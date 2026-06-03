@@ -11,3 +11,10 @@ _Atomic
 lean_alloc_small
 lean_free_small
 lean_small_mem_size
+
+# Inline fns whose bodies expand compile-time #defines from version.h
+# (LEAN_PLATFORM_TARGET, LEAN_MANUAL_ROOT) that vary per toolchain build.
+# Mirroring them would hardcode one platform's strings; call into Lean for
+# these values instead.
+lean_system_platform_target
+lean_manual_get_root

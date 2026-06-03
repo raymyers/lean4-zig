@@ -71,64 +71,64 @@ guesswork.
 One-line `pub extern fn` declarations; the linker verifies existence via the
 `compile_test`. Grouped by family:
 
-- [ ] Float bit-level & string ops: `lean_float_to_bits`, `lean_float_of_bits`,
+- [x] Float bit-level & string ops: `lean_float_to_bits`, `lean_float_of_bits`,
       `lean_float_frexp`(if missing), `lean_float32_to_bits`,
       `lean_float32_of_bits`, `lean_float32_to_string`, `lean_float32_frexp`,
       `lean_float32_scaleb`, `lean_float32_isnan/isinf/isfinite`
-- [ ] Big-int bridges: `lean_int8/16/32/64_of_big_int`, `lean_isize_of_big_int`,
+- [x] Big-int bridges: `lean_int8/16/32/64_of_big_int`, `lean_isize_of_big_int`,
       `lean_int_big_ediv/emod/div_exact`, `lean_nat_big_div_exact`,
       `lean_nat_big_shiftr`
-- [ ] String: `lean_mk_string_unchecked`, `lean_mk_ascii_string_unchecked`,
+- [x] String: `lean_mk_string_unchecked`, `lean_mk_ascii_string_unchecked`,
       `lean_mk_string_from_bytes_unchecked`, `lean_string_memcmp`,
       `lean_string_of_usize`
-- [ ] Once/lazy-init cold paths: `lean_obj_once_cold`,
+- [x] Once/lazy-init cold paths: `lean_obj_once_cold`,
       `lean_uint8/16/32/64_once_cold`, `lean_usize_once_cold`,
       `lean_float_once_cold`, `lean_float32_once_cold`
-- [ ] Misc: `lean_array_to_list`, `lean_object_data_byte_size`, `lean_panic`,
+- [x] Misc: `lean_array_to_list`, `lean_object_data_byte_size`, `lean_panic`,
       `lean_panic_fn_borrowed`, `lean_run_main`, `lean_decode_uv_error`,
       `lean_io_get_task_state_core`, `lean_slice_hash`, `lean_slice_dec_lt`
-- [ ] Re-run inventory: missing-extern count is 0 modulo allowlist
-- [ ] `zig build test` green (compile_test now links every new extern)
+- [x] Re-run inventory: missing-extern count is 0 modulo allowlist
+- [x] `zig build test` green (compile_test now links every new extern)
 
 ## Milestone 2 — Inline translation completeness (216 fns, semantic risk)
 
 Translate in families, each with its upstream body read side-by-side. Every
 family lands together with its Milestone 3 tests.
 
-- [ ] **Signed integers** (~120 fns): `Int8`/`Int16`/`Int32`/`Int64`/`ISize` —
+- [x] **Signed integers** (~120 fns): `Int8`/`Int16`/`Int32`/`Int64`/`ISize` —
       `add/sub/mul/div/mod/neg/abs/complement/land/lor/xor/shift_left/
       shift_right/dec_eq/dec_le/dec_lt/of_int/of_nat/to_*` for each width.
       Mind C semantics: wrapping arithmetic, shift masking, division by zero
       → 0 / `a`, `INT_MIN` edge cases
-- [ ] **Float32** (~30 fns): arithmetic, comparisons, conversions to/from all
+- [x] **Float32** (~30 fns): arithmetic, comparisons, conversions to/from all
       integer widths, `lean_box_float32`/`lean_unbox_float32`,
       `lean_ctor_get_float32`/`lean_ctor_set_float32`
-- [ ] **Remaining conversions** (~25 fns): `lean_bool_to_*`, `lean_uint*_neg`,
+- [x] **Remaining conversions** (~25 fns): `lean_bool_to_*`, `lean_uint*_neg`,
       `lean_uint*_to_float/float32`, `lean_usize_to_uint8/16`,
       `lean_float_to_int*`/`isize`, `lean_float_to_float32`/`float32_to_float`
-- [ ] **Once helpers**: `lean_obj_once`, `lean_uint8/16/32/64_once`,
+- [x] **Once helpers**: `lean_obj_once`, `lean_uint8/16/32/64_once`,
       `lean_usize_once`, `lean_float_once`, `lean_float32_once` (pair with
       their `_cold` externs from M1; double-checked locking semantics)
-- [ ] **Borrowed accessors**: `lean_array_get_borrowed`,
+- [x] **Borrowed accessors**: `lean_array_get_borrowed`,
       `lean_array_fget_borrowed`, `lean_array_uget_borrowed`,
       `lean_io_result_take_value` — these encode the `@&` borrowing
       convention from the reference
-- [ ] **Object/alloc helpers**: `lean_del_object`, `lean_void_mk`,
+- [x] **Object/alloc helpers**: `lean_del_object`, `lean_void_mk`,
       `lean_is_exclusive_obj`, `lean_set_external_data`,
       `lean_closure_arg_cptr`, `lean_closure_byte_size`,
       `lean_closure_data_byte_size`, `lean_array_data_byte_size`,
       `lean_sarray_data_byte_size`, `lean_string_data_byte_size`,
       `lean_sarray_would_overflow`, `lean_usize_add/mul_would_overflow`,
       `lean_string_get_byte_fast`
-- [ ] **Promises**: `lean_is_promise`, `lean_to_promise` (+ verify the
+- [x] **Promises**: `lean_is_promise`, `lean_to_promise` (+ verify the
       `lean_promise_*` externs are declared)
-- [ ] **Int/Nat exact division**: `lean_int_ediv`, `lean_int_emod`,
+- [x] **Int/Nat exact division**: `lean_int_ediv`, `lean_int_emod`,
       `lean_int_div_exact`, `lean_nat_div_exact`
-- [ ] **Platform helpers**: `lean_system_platform_target`,
+- [x] **Platform helpers**: `lean_system_platform_target`,
       `lean_manual_get_root`, `lean_runtime_hold` (read upstream docs/usage
       first; skip-with-reason if not meaningful from Zig)
-- [ ] Re-run inventory: missing-inline count is 0 modulo allowlist
-- [ ] Add every new pub decl to `compile_test`
+- [x] Re-run inventory: missing-inline count is 0 modulo allowlist
+- [x] Add every new pub decl to `compile_test`
 
 ## Milestone 3 — Behavioral test coverage of the ABI
 

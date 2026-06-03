@@ -30,7 +30,8 @@ pub inline fn LEAN_BYTE(Var: anytype, Index: anytype) @TypeOf((std.zig.c_transla
     return (std.zig.c_translation.helpers.cast([*]u8, &Var) + Index).*;
 }
 
-pub const LeanMaxCtorTag = 244;
+pub const LeanMaxCtorTag = 243;
+pub const LeanPromise = 244;
 pub const LeanClosure = 245;
 pub const LeanArray = 246;
 pub const LeanStructArray = 247;
@@ -2345,6 +2346,991 @@ test "compile_test" {
 pub extern fn lean_initialize_runtime_module() void;
 pub extern fn lean_initialize() void;
 
+// ===========================================================================
+// Lean v4.30 surface additions. Generated to mirror lean.h v4.30.0 exactly;
+// audit against `zig build ffi-drift` output when bumping the toolchain.
+
+// --- new LEAN_EXPORT externs ------------------------------------------------
+pub extern fn lean_panic(msg: [*:0]const u8, force_stderr: bool) void;
+pub extern fn lean_panic_fn_borrowed(default_val: b_lean_obj_arg, msg: LeanPtr) LeanPtr;
+pub extern fn lean_object_data_byte_size(o: LeanPtr) usize;
+pub extern fn lean_array_to_list(a: lean_obj_arg) LeanPtr;
+pub extern fn lean_mk_string_unchecked(s: [*:0]const u8, sz: usize, len: usize) lean_obj_res;
+pub extern fn lean_mk_string_from_bytes_unchecked(s: [*]const u8, sz: usize) lean_obj_res;
+pub extern fn lean_mk_ascii_string_unchecked(s: [*:0]const u8) lean_obj_res;
+pub extern fn lean_string_of_usize(n: usize) lean_obj_res;
+pub extern fn lean_string_memcmp(s1: b_lean_obj_arg, s2: b_lean_obj_arg, lstart: b_lean_obj_arg, rstart: b_lean_obj_arg, len: b_lean_obj_arg) u8;
+pub extern fn lean_slice_hash(s: b_lean_obj_arg) u64;
+pub extern fn lean_slice_dec_lt(s1: b_lean_obj_arg, s2: b_lean_obj_arg) u8;
+pub extern fn lean_io_get_task_state_core(t: b_lean_obj_arg) u8;
+pub extern fn lean_nat_big_div_exact(a1: LeanPtr, a2: LeanPtr) LeanPtr;
+pub extern fn lean_nat_big_shiftr(a1: b_lean_obj_arg, a2: b_lean_obj_arg) lean_obj_res;
+pub extern fn lean_int_big_div_exact(a1: LeanPtr, a2: LeanPtr) LeanPtr;
+pub extern fn lean_int_big_ediv(a1: LeanPtr, a2: LeanPtr) LeanPtr;
+pub extern fn lean_int_big_emod(a1: LeanPtr, a2: LeanPtr) LeanPtr;
+pub extern fn lean_int8_of_big_int(a: b_lean_obj_arg) i8;
+pub extern fn lean_int16_of_big_int(a: b_lean_obj_arg) i16;
+pub extern fn lean_int32_of_big_int(a: b_lean_obj_arg) i32;
+pub extern fn lean_int64_of_big_int(a: b_lean_obj_arg) i64;
+pub extern fn lean_isize_of_big_int(a: b_lean_obj_arg) isize;
+pub extern fn lean_float_of_bits(u: u64) f64;
+pub extern fn lean_float_to_bits(d: f64) u64;
+pub extern fn lean_float32_of_bits(u: u32) f32;
+pub extern fn lean_float32_to_bits(d: f32) u32;
+pub extern fn lean_float32_to_string(a: f32) lean_obj_res;
+pub extern fn lean_float32_scaleb(a: f32, b: b_lean_obj_arg) f32;
+pub extern fn lean_float32_isnan(a: f32) u8;
+pub extern fn lean_float32_isfinite(a: f32) u8;
+pub extern fn lean_float32_isinf(a: f32) u8;
+pub extern fn lean_float32_frexp(a: f32) lean_obj_res;
+pub extern fn lean_decode_uv_error(errnum: c_int, fname: b_lean_obj_arg) lean_obj_res;
+pub extern fn lean_run_main(main_fn: ?*const fn (c_int, [*c][*c]u8) callconv(.c) LeanPtr, argc: c_int, argv: [*c][*c]u8) LeanPtr;
+
+// --- once cells -------------------------------------------------------------
+pub const lean_once_cell_t = extern struct {
+    state: c_int, // _Atomic in C
+    lock: c_int, // _Atomic in C
+};
+
+pub extern fn lean_obj_once_cold(loc: *LeanPtr, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) LeanPtr) LeanPtr;
+pub fn lean_obj_once(loc: *LeanPtr, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) LeanPtr) callconv(.c) LeanPtr {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_obj_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_uint8_once_cold(loc: *u8, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u8) u8;
+pub fn lean_uint8_once(loc: *u8, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u8) callconv(.c) u8 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_uint8_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_uint16_once_cold(loc: *u16, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u16) u16;
+pub fn lean_uint16_once(loc: *u16, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u16) callconv(.c) u16 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_uint16_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_uint32_once_cold(loc: *u32, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u32) u32;
+pub fn lean_uint32_once(loc: *u32, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u32) callconv(.c) u32 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_uint32_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_uint64_once_cold(loc: *u64, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u64) u64;
+pub fn lean_uint64_once(loc: *u64, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) u64) callconv(.c) u64 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_uint64_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_usize_once_cold(loc: *usize, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) usize) usize;
+pub fn lean_usize_once(loc: *usize, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) usize) callconv(.c) usize {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_usize_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_float32_once_cold(loc: *f32, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) f32) f32;
+pub fn lean_float32_once(loc: *f32, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) f32) callconv(.c) f32 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_float32_once_cold(loc, tok, init_fn);
+}
+pub extern fn lean_float_once_cold(loc: *f64, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) f64) f64;
+pub fn lean_float_once(loc: *f64, tok: *lean_once_cell_t, init_fn: ?*const fn () callconv(.c) f64) callconv(.c) f64 {
+    if (LEAN_LIKELY(@atomicLoad(c_int, &tok.state, .seq_cst) == 1)) return loc.*;
+    return lean_float_once_cold(loc, tok, init_fn);
+}
+
+// --- signed integers (carrier types are unsigned, as in lean.h) -------------
+
+// Int8
+pub fn lean_int8_of_int(a: b_lean_obj_arg) callconv(.c) u8 {
+    if (lean_is_scalar(a)) return @truncate(@as(u64, @bitCast(lean_scalar_to_int64(a))));
+    return @bitCast(lean_int8_of_big_int(a));
+}
+pub fn lean_int8_of_nat(a: b_lean_obj_arg) callconv(.c) u8 {
+    if (lean_is_scalar(a)) return @truncate(lean_unbox(a));
+    return @bitCast(lean_int8_of_big_int(a));
+}
+
+pub fn lean_int8_to_int(a: u8) callconv(.c) lean_obj_res {
+    return lean_int64_to_int(@as(i64, @as(i8, @bitCast(a))));
+}
+
+pub fn lean_int8_neg(a: u8) callconv(.c) u8 {
+    return 0 -% a;
+}
+pub fn lean_int8_add(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 +% a2;
+}
+pub fn lean_int8_sub(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 -% a2;
+}
+pub fn lean_int8_mul(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 *% a2;
+}
+pub fn lean_int8_div(a1: u8, a2: u8) callconv(.c) u8 {
+    const lhs: i8 = @bitCast(a1);
+    const rhs: i8 = @bitCast(a2);
+    if (rhs == 0) return 0;
+    // minInt / -1 wraps to minInt (C widens or branches to avoid the idiv trap)
+    if (lhs == std.math.minInt(i8) and rhs == -1) return a1;
+    return @bitCast(@divTrunc(lhs, rhs));
+}
+pub fn lean_int8_mod(a1: u8, a2: u8) callconv(.c) u8 {
+    const lhs: i8 = @bitCast(a1);
+    const rhs: i8 = @bitCast(a2);
+    if (rhs == 0) return a1;
+    if (lhs == std.math.minInt(i8) and rhs == -1) return 0;
+    return @bitCast(@rem(lhs, rhs));
+}
+pub fn lean_int8_land(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 & a2;
+}
+pub fn lean_int8_lor(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 | a2;
+}
+pub fn lean_int8_xor(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 ^ a2;
+}
+pub fn lean_int8_shift_right(a1: u8, a2: u8) callconv(.c) u8 {
+    const lhs: i8 = @bitCast(a1);
+    const rhs: i8 = @bitCast(a2);
+    // shift amount is rhs smod bitwidth
+    const amt: std.math.Log2Int(i8) = @intCast(@mod(rhs, @as(i8, @bitSizeOf(i8))));
+    return @bitCast(lhs >> amt);
+}
+pub fn lean_int8_shift_left(a1: u8, a2: u8) callconv(.c) u8 {
+    const rhs: i8 = @bitCast(a2);
+    const amt: std.math.Log2Int(u8) = @intCast(@mod(rhs, @as(i8, @bitSizeOf(i8))));
+    return a1 << amt;
+}
+pub fn lean_int8_complement(a: u8) callconv(.c) u8 {
+    return ~a;
+}
+pub fn lean_int8_abs(a: u8) callconv(.c) u8 {
+    return if (@as(i8, @bitCast(a)) < 0) 0 -% a else a;
+}
+pub fn lean_int8_dec_eq(a1: u8, a2: u8) callconv(.c) u8 {
+    return @intFromBool(@as(i8, @bitCast(a1)) == @as(i8, @bitCast(a2)));
+}
+pub fn lean_int8_dec_lt(a1: u8, a2: u8) callconv(.c) u8 {
+    return @intFromBool(@as(i8, @bitCast(a1)) < @as(i8, @bitCast(a2)));
+}
+pub fn lean_int8_dec_le(a1: u8, a2: u8) callconv(.c) u8 {
+    return @intFromBool(@as(i8, @bitCast(a1)) <= @as(i8, @bitCast(a2)));
+}
+pub fn lean_int8_to_float(a: u8) callconv(.c) f64 {
+    return @floatFromInt(@as(i8, @bitCast(a)));
+}
+pub fn lean_int8_to_float32(a: u8) callconv(.c) f32 {
+    return @floatFromInt(@as(i8, @bitCast(a)));
+}
+
+pub fn lean_int8_to_int16(a: u8) callconv(.c) u16 {
+    return @bitCast(@as(i16, @as(i16, @as(i8, @bitCast(a)))));
+}
+
+pub fn lean_int8_to_int32(a: u8) callconv(.c) u32 {
+    return @bitCast(@as(i32, @as(i32, @as(i8, @bitCast(a)))));
+}
+
+pub fn lean_int8_to_int64(a: u8) callconv(.c) u64 {
+    return @bitCast(@as(i64, @as(i64, @as(i8, @bitCast(a)))));
+}
+
+pub fn lean_int8_to_isize(a: u8) callconv(.c) usize {
+    return @bitCast(@as(isize, @as(isize, @as(i8, @bitCast(a)))));
+}
+
+// Int16
+pub fn lean_int16_of_int(a: b_lean_obj_arg) callconv(.c) u16 {
+    if (lean_is_scalar(a)) return @truncate(@as(u64, @bitCast(lean_scalar_to_int64(a))));
+    return @bitCast(lean_int16_of_big_int(a));
+}
+pub fn lean_int16_of_nat(a: b_lean_obj_arg) callconv(.c) u16 {
+    if (lean_is_scalar(a)) return @truncate(lean_unbox(a));
+    return @bitCast(lean_int16_of_big_int(a));
+}
+
+pub fn lean_int16_to_int(a: u16) callconv(.c) lean_obj_res {
+    return lean_int64_to_int(@as(i64, @as(i16, @bitCast(a))));
+}
+
+pub fn lean_int16_neg(a: u16) callconv(.c) u16 {
+    return 0 -% a;
+}
+pub fn lean_int16_add(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 +% a2;
+}
+pub fn lean_int16_sub(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 -% a2;
+}
+pub fn lean_int16_mul(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 *% a2;
+}
+pub fn lean_int16_div(a1: u16, a2: u16) callconv(.c) u16 {
+    const lhs: i16 = @bitCast(a1);
+    const rhs: i16 = @bitCast(a2);
+    if (rhs == 0) return 0;
+    // minInt / -1 wraps to minInt (C widens or branches to avoid the idiv trap)
+    if (lhs == std.math.minInt(i16) and rhs == -1) return a1;
+    return @bitCast(@divTrunc(lhs, rhs));
+}
+pub fn lean_int16_mod(a1: u16, a2: u16) callconv(.c) u16 {
+    const lhs: i16 = @bitCast(a1);
+    const rhs: i16 = @bitCast(a2);
+    if (rhs == 0) return a1;
+    if (lhs == std.math.minInt(i16) and rhs == -1) return 0;
+    return @bitCast(@rem(lhs, rhs));
+}
+pub fn lean_int16_land(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 & a2;
+}
+pub fn lean_int16_lor(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 | a2;
+}
+pub fn lean_int16_xor(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 ^ a2;
+}
+pub fn lean_int16_shift_right(a1: u16, a2: u16) callconv(.c) u16 {
+    const lhs: i16 = @bitCast(a1);
+    const rhs: i16 = @bitCast(a2);
+    // shift amount is rhs smod bitwidth
+    const amt: std.math.Log2Int(i16) = @intCast(@mod(rhs, @as(i16, @bitSizeOf(i16))));
+    return @bitCast(lhs >> amt);
+}
+pub fn lean_int16_shift_left(a1: u16, a2: u16) callconv(.c) u16 {
+    const rhs: i16 = @bitCast(a2);
+    const amt: std.math.Log2Int(u16) = @intCast(@mod(rhs, @as(i16, @bitSizeOf(i16))));
+    return a1 << amt;
+}
+pub fn lean_int16_complement(a: u16) callconv(.c) u16 {
+    return ~a;
+}
+pub fn lean_int16_abs(a: u16) callconv(.c) u16 {
+    return if (@as(i16, @bitCast(a)) < 0) 0 -% a else a;
+}
+pub fn lean_int16_dec_eq(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(@as(i16, @bitCast(a1)) == @as(i16, @bitCast(a2)));
+}
+pub fn lean_int16_dec_lt(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(@as(i16, @bitCast(a1)) < @as(i16, @bitCast(a2)));
+}
+pub fn lean_int16_dec_le(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(@as(i16, @bitCast(a1)) <= @as(i16, @bitCast(a2)));
+}
+pub fn lean_int16_to_float(a: u16) callconv(.c) f64 {
+    return @floatFromInt(@as(i16, @bitCast(a)));
+}
+pub fn lean_int16_to_float32(a: u16) callconv(.c) f32 {
+    return @floatFromInt(@as(i16, @bitCast(a)));
+}
+
+pub fn lean_int16_to_int8(a: u16) callconv(.c) u8 {
+    return @bitCast(@as(i8, @truncate(@as(i16, @bitCast(a)))));
+}
+
+pub fn lean_int16_to_int32(a: u16) callconv(.c) u32 {
+    return @bitCast(@as(i32, @as(i32, @as(i16, @bitCast(a)))));
+}
+
+pub fn lean_int16_to_int64(a: u16) callconv(.c) u64 {
+    return @bitCast(@as(i64, @as(i64, @as(i16, @bitCast(a)))));
+}
+
+pub fn lean_int16_to_isize(a: u16) callconv(.c) usize {
+    return @bitCast(@as(isize, @as(isize, @as(i16, @bitCast(a)))));
+}
+
+// Int32
+pub fn lean_int32_of_int(a: b_lean_obj_arg) callconv(.c) u32 {
+    if (lean_is_scalar(a)) return @truncate(@as(u64, @bitCast(lean_scalar_to_int64(a))));
+    return @bitCast(lean_int32_of_big_int(a));
+}
+pub fn lean_int32_of_nat(a: b_lean_obj_arg) callconv(.c) u32 {
+    if (lean_is_scalar(a)) return @truncate(lean_unbox(a));
+    return @bitCast(lean_int32_of_big_int(a));
+}
+
+pub fn lean_int32_to_int(a: u32) callconv(.c) lean_obj_res {
+    return lean_int64_to_int(@as(i64, @as(i32, @bitCast(a))));
+}
+
+pub fn lean_int32_neg(a: u32) callconv(.c) u32 {
+    return 0 -% a;
+}
+pub fn lean_int32_add(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 +% a2;
+}
+pub fn lean_int32_sub(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 -% a2;
+}
+pub fn lean_int32_mul(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 *% a2;
+}
+pub fn lean_int32_div(a1: u32, a2: u32) callconv(.c) u32 {
+    const lhs: i32 = @bitCast(a1);
+    const rhs: i32 = @bitCast(a2);
+    if (rhs == 0) return 0;
+    // minInt / -1 wraps to minInt (C widens or branches to avoid the idiv trap)
+    if (lhs == std.math.minInt(i32) and rhs == -1) return a1;
+    return @bitCast(@divTrunc(lhs, rhs));
+}
+pub fn lean_int32_mod(a1: u32, a2: u32) callconv(.c) u32 {
+    const lhs: i32 = @bitCast(a1);
+    const rhs: i32 = @bitCast(a2);
+    if (rhs == 0) return a1;
+    if (lhs == std.math.minInt(i32) and rhs == -1) return 0;
+    return @bitCast(@rem(lhs, rhs));
+}
+pub fn lean_int32_land(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 & a2;
+}
+pub fn lean_int32_lor(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 | a2;
+}
+pub fn lean_int32_xor(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 ^ a2;
+}
+pub fn lean_int32_shift_right(a1: u32, a2: u32) callconv(.c) u32 {
+    const lhs: i32 = @bitCast(a1);
+    const rhs: i32 = @bitCast(a2);
+    // shift amount is rhs smod bitwidth
+    const amt: std.math.Log2Int(i32) = @intCast(@mod(rhs, @as(i32, @bitSizeOf(i32))));
+    return @bitCast(lhs >> amt);
+}
+pub fn lean_int32_shift_left(a1: u32, a2: u32) callconv(.c) u32 {
+    const rhs: i32 = @bitCast(a2);
+    const amt: std.math.Log2Int(u32) = @intCast(@mod(rhs, @as(i32, @bitSizeOf(i32))));
+    return a1 << amt;
+}
+pub fn lean_int32_complement(a: u32) callconv(.c) u32 {
+    return ~a;
+}
+pub fn lean_int32_abs(a: u32) callconv(.c) u32 {
+    return if (@as(i32, @bitCast(a)) < 0) 0 -% a else a;
+}
+pub fn lean_int32_dec_eq(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(@as(i32, @bitCast(a1)) == @as(i32, @bitCast(a2)));
+}
+pub fn lean_int32_dec_lt(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(@as(i32, @bitCast(a1)) < @as(i32, @bitCast(a2)));
+}
+pub fn lean_int32_dec_le(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(@as(i32, @bitCast(a1)) <= @as(i32, @bitCast(a2)));
+}
+pub fn lean_int32_to_float(a: u32) callconv(.c) f64 {
+    return @floatFromInt(@as(i32, @bitCast(a)));
+}
+pub fn lean_int32_to_float32(a: u32) callconv(.c) f32 {
+    return @floatFromInt(@as(i32, @bitCast(a)));
+}
+
+pub fn lean_int32_to_int8(a: u32) callconv(.c) u8 {
+    return @bitCast(@as(i8, @truncate(@as(i32, @bitCast(a)))));
+}
+
+pub fn lean_int32_to_int16(a: u32) callconv(.c) u16 {
+    return @bitCast(@as(i16, @truncate(@as(i32, @bitCast(a)))));
+}
+
+pub fn lean_int32_to_int64(a: u32) callconv(.c) u64 {
+    return @bitCast(@as(i64, @as(i64, @as(i32, @bitCast(a)))));
+}
+
+pub fn lean_int32_to_isize(a: u32) callconv(.c) usize {
+    return @bitCast(@as(isize, @as(isize, @as(i32, @bitCast(a)))));
+}
+
+// Int64
+pub fn lean_int64_of_int(a: b_lean_obj_arg) callconv(.c) u64 {
+    if (lean_is_scalar(a)) return @truncate(@as(u64, @bitCast(lean_scalar_to_int64(a))));
+    return @bitCast(lean_int64_of_big_int(a));
+}
+pub fn lean_int64_of_nat(a: b_lean_obj_arg) callconv(.c) u64 {
+    if (lean_is_scalar(a)) return @truncate(lean_unbox(a));
+    return @bitCast(lean_int64_of_big_int(a));
+}
+
+pub fn lean_int64_to_int_sint(a: u64) callconv(.c) lean_obj_res {
+    return lean_int64_to_int(@bitCast(a));
+}
+
+pub fn lean_int64_neg(a: u64) callconv(.c) u64 {
+    return 0 -% a;
+}
+pub fn lean_int64_add(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 +% a2;
+}
+pub fn lean_int64_sub(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 -% a2;
+}
+pub fn lean_int64_mul(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 *% a2;
+}
+pub fn lean_int64_div(a1: u64, a2: u64) callconv(.c) u64 {
+    const lhs: i64 = @bitCast(a1);
+    const rhs: i64 = @bitCast(a2);
+    if (rhs == 0) return 0;
+    // minInt / -1 wraps to minInt (C widens or branches to avoid the idiv trap)
+    if (lhs == std.math.minInt(i64) and rhs == -1) return a1;
+    return @bitCast(@divTrunc(lhs, rhs));
+}
+pub fn lean_int64_mod(a1: u64, a2: u64) callconv(.c) u64 {
+    const lhs: i64 = @bitCast(a1);
+    const rhs: i64 = @bitCast(a2);
+    if (rhs == 0) return a1;
+    if (lhs == std.math.minInt(i64) and rhs == -1) return 0;
+    return @bitCast(@rem(lhs, rhs));
+}
+pub fn lean_int64_land(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 & a2;
+}
+pub fn lean_int64_lor(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 | a2;
+}
+pub fn lean_int64_xor(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 ^ a2;
+}
+pub fn lean_int64_shift_right(a1: u64, a2: u64) callconv(.c) u64 {
+    const lhs: i64 = @bitCast(a1);
+    const rhs: i64 = @bitCast(a2);
+    // shift amount is rhs smod bitwidth
+    const amt: std.math.Log2Int(i64) = @intCast(@mod(rhs, @as(i64, @bitSizeOf(i64))));
+    return @bitCast(lhs >> amt);
+}
+pub fn lean_int64_shift_left(a1: u64, a2: u64) callconv(.c) u64 {
+    const rhs: i64 = @bitCast(a2);
+    const amt: std.math.Log2Int(u64) = @intCast(@mod(rhs, @as(i64, @bitSizeOf(i64))));
+    return a1 << amt;
+}
+pub fn lean_int64_complement(a: u64) callconv(.c) u64 {
+    return ~a;
+}
+pub fn lean_int64_abs(a: u64) callconv(.c) u64 {
+    return if (@as(i64, @bitCast(a)) < 0) 0 -% a else a;
+}
+pub fn lean_int64_dec_eq(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(@as(i64, @bitCast(a1)) == @as(i64, @bitCast(a2)));
+}
+pub fn lean_int64_dec_lt(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(@as(i64, @bitCast(a1)) < @as(i64, @bitCast(a2)));
+}
+pub fn lean_int64_dec_le(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(@as(i64, @bitCast(a1)) <= @as(i64, @bitCast(a2)));
+}
+pub fn lean_int64_to_float(a: u64) callconv(.c) f64 {
+    return @floatFromInt(@as(i64, @bitCast(a)));
+}
+pub fn lean_int64_to_float32(a: u64) callconv(.c) f32 {
+    return @floatFromInt(@as(i64, @bitCast(a)));
+}
+
+pub fn lean_int64_to_int8(a: u64) callconv(.c) u8 {
+    return @bitCast(@as(i8, @truncate(@as(i64, @bitCast(a)))));
+}
+
+pub fn lean_int64_to_int16(a: u64) callconv(.c) u16 {
+    return @bitCast(@as(i16, @truncate(@as(i64, @bitCast(a)))));
+}
+
+pub fn lean_int64_to_int32(a: u64) callconv(.c) u32 {
+    return @bitCast(@as(i32, @truncate(@as(i64, @bitCast(a)))));
+}
+
+pub fn lean_int64_to_isize(a: u64) callconv(.c) usize {
+    return @bitCast(@as(isize, @truncate(@as(i64, @bitCast(a)))));
+}
+
+// Isize
+pub fn lean_isize_of_int(a: b_lean_obj_arg) callconv(.c) usize {
+    if (lean_is_scalar(a)) return @truncate(@as(u64, @bitCast(lean_scalar_to_int64(a))));
+    return @bitCast(lean_isize_of_big_int(a));
+}
+pub fn lean_isize_of_nat(a: b_lean_obj_arg) callconv(.c) usize {
+    if (lean_is_scalar(a)) return @truncate(lean_unbox(a));
+    return @bitCast(lean_isize_of_big_int(a));
+}
+
+pub fn lean_isize_to_int(a: usize) callconv(.c) lean_obj_res {
+    return lean_int64_to_int(@as(i64, @as(isize, @bitCast(a))));
+}
+
+pub fn lean_isize_neg(a: usize) callconv(.c) usize {
+    return 0 -% a;
+}
+pub fn lean_isize_add(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 +% a2;
+}
+pub fn lean_isize_sub(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 -% a2;
+}
+pub fn lean_isize_mul(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 *% a2;
+}
+pub fn lean_isize_div(a1: usize, a2: usize) callconv(.c) usize {
+    const lhs: isize = @bitCast(a1);
+    const rhs: isize = @bitCast(a2);
+    if (rhs == 0) return 0;
+    // minInt / -1 wraps to minInt (C widens or branches to avoid the idiv trap)
+    if (lhs == std.math.minInt(isize) and rhs == -1) return a1;
+    return @bitCast(@divTrunc(lhs, rhs));
+}
+pub fn lean_isize_mod(a1: usize, a2: usize) callconv(.c) usize {
+    const lhs: isize = @bitCast(a1);
+    const rhs: isize = @bitCast(a2);
+    if (rhs == 0) return a1;
+    if (lhs == std.math.minInt(isize) and rhs == -1) return 0;
+    return @bitCast(@rem(lhs, rhs));
+}
+pub fn lean_isize_land(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 & a2;
+}
+pub fn lean_isize_lor(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 | a2;
+}
+pub fn lean_isize_xor(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 ^ a2;
+}
+pub fn lean_isize_shift_right(a1: usize, a2: usize) callconv(.c) usize {
+    const lhs: isize = @bitCast(a1);
+    const rhs: isize = @bitCast(a2);
+    // shift amount is rhs smod bitwidth
+    const amt: std.math.Log2Int(isize) = @intCast(@mod(rhs, @as(isize, @bitSizeOf(isize))));
+    return @bitCast(lhs >> amt);
+}
+pub fn lean_isize_shift_left(a1: usize, a2: usize) callconv(.c) usize {
+    const rhs: isize = @bitCast(a2);
+    const amt: std.math.Log2Int(usize) = @intCast(@mod(rhs, @as(isize, @bitSizeOf(isize))));
+    return a1 << amt;
+}
+pub fn lean_isize_complement(a: usize) callconv(.c) usize {
+    return ~a;
+}
+pub fn lean_isize_abs(a: usize) callconv(.c) usize {
+    return if (@as(isize, @bitCast(a)) < 0) 0 -% a else a;
+}
+pub fn lean_isize_dec_eq(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(@as(isize, @bitCast(a1)) == @as(isize, @bitCast(a2)));
+}
+pub fn lean_isize_dec_lt(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(@as(isize, @bitCast(a1)) < @as(isize, @bitCast(a2)));
+}
+pub fn lean_isize_dec_le(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(@as(isize, @bitCast(a1)) <= @as(isize, @bitCast(a2)));
+}
+pub fn lean_isize_to_float(a: usize) callconv(.c) f64 {
+    return @floatFromInt(@as(isize, @bitCast(a)));
+}
+pub fn lean_isize_to_float32(a: usize) callconv(.c) f32 {
+    return @floatFromInt(@as(isize, @bitCast(a)));
+}
+
+pub fn lean_isize_to_int8(a: usize) callconv(.c) u8 {
+    return @bitCast(@as(i8, @truncate(@as(isize, @bitCast(a)))));
+}
+
+pub fn lean_isize_to_int16(a: usize) callconv(.c) u16 {
+    return @bitCast(@as(i16, @truncate(@as(isize, @bitCast(a)))));
+}
+
+pub fn lean_isize_to_int32(a: usize) callconv(.c) u32 {
+    return @bitCast(@as(i32, @truncate(@as(isize, @bitCast(a)))));
+}
+
+pub fn lean_isize_to_int64(a: usize) callconv(.c) u64 {
+    return @bitCast(@as(i64, @as(i64, @as(isize, @bitCast(a)))));
+}
+
+// --- Float32 -----------------------------------------------------------------
+pub fn lean_float32_add(a: f32, b: f32) callconv(.c) f32 {
+    return a + b;
+}
+pub fn lean_float32_sub(a: f32, b: f32) callconv(.c) f32 {
+    return a - b;
+}
+pub fn lean_float32_mul(a: f32, b: f32) callconv(.c) f32 {
+    return a * b;
+}
+pub fn lean_float32_div(a: f32, b: f32) callconv(.c) f32 {
+    return a / b;
+}
+pub fn lean_float32_negate(a: f32) callconv(.c) f32 {
+    return -a;
+}
+pub fn lean_float32_beq(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a == b);
+}
+pub fn lean_float32_decLe(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a <= b);
+}
+pub fn lean_float32_decLt(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a < b);
+}
+pub fn lean_float32_to_float(a: f32) callconv(.c) f64 {
+    return @floatCast(a);
+}
+pub fn lean_float_to_float32(a: f64) callconv(.c) f32 {
+    return @floatCast(a);
+}
+pub fn lean_box_float32(v: f32) callconv(.c) lean_obj_res {
+    const r = lean_alloc_ctor(0, 0, @sizeOf(f32));
+    lean_ctor_set_float32(r, 0, v);
+    return r;
+}
+pub fn lean_unbox_float32(o: b_lean_obj_arg) callconv(.c) f32 {
+    return lean_ctor_get_float32(o, 0);
+}
+pub fn lean_ctor_get_float32(o: b_lean_obj_arg, offset: c_uint) callconv(.c) f32 {
+    assert(@src(), offset >= lean_ctor_num_objs(o) * @sizeOf(*anyopaque), "offset >= lean_ctor_num_objs(o) * sizeof(void*)");
+    return @as(*align(1) const f32, @ptrCast(@as([*]const u8, @ptrCast(lean_ctor_obj_cptr(o))) + offset)).*;
+}
+pub fn lean_ctor_set_float32(o: b_lean_obj_arg, offset: c_uint, v: f32) callconv(.c) void {
+    assert(@src(), offset >= lean_ctor_num_objs(o) * @sizeOf(*anyopaque), "offset >= lean_ctor_num_objs(o) * sizeof(void*)");
+    @as(*align(1) f32, @ptrCast(@as([*]u8, @ptrCast(lean_ctor_obj_cptr(o))) + offset)).* = v;
+}
+
+// --- saturating float/float32 -> integer conversions (lean.h semantics) -----
+pub fn lean_float_to_int8(a: f64) callconv(.c) u8 {
+    const result: i8 = if (lean_float_isnan(a) != 0)
+        0
+    else if (-129.0 < a)
+        (if (a < 128.0) @intFromFloat(a) else std.math.maxInt(i8))
+    else
+        std.math.minInt(i8);
+    return @bitCast(result);
+}
+
+pub fn lean_float_to_int16(a: f64) callconv(.c) u16 {
+    const result: i16 = if (lean_float_isnan(a) != 0)
+        0
+    else if (-32769.0 < a)
+        (if (a < 32768.0) @intFromFloat(a) else std.math.maxInt(i16))
+    else
+        std.math.minInt(i16);
+    return @bitCast(result);
+}
+
+pub fn lean_float_to_int32(a: f64) callconv(.c) u32 {
+    const result: i32 = if (lean_float_isnan(a) != 0)
+        0
+    else if (-2147483649.0 < a)
+        (if (a < 2147483648.0) @intFromFloat(a) else std.math.maxInt(i32))
+    else
+        std.math.minInt(i32);
+    return @bitCast(result);
+}
+
+pub fn lean_float_to_int64(a: f64) callconv(.c) u64 {
+    const result: i64 = if (lean_float_isnan(a) != 0)
+        0
+    else if (-9223372036854775809.0 < a)
+        (if (a < 9223372036854775808.0) @intFromFloat(a) else std.math.maxInt(i64))
+    else
+        std.math.minInt(i64);
+    return @bitCast(result);
+}
+
+pub fn lean_float_to_isize(a: f64) callconv(.c) usize {
+    if (@bitSizeOf(usize) == 64) {
+        return @truncate(lean_float_to_int64(a));
+    } else {
+        return @as(u32, lean_float_to_int32(a));
+    }
+}
+
+pub fn lean_float32_to_int8(a: f32) callconv(.c) u8 {
+    const result: i8 = if (lean_float32_isnan(a) != 0)
+        0
+    else if (-129.0 < a)
+        (if (a < 128.0) @intFromFloat(a) else std.math.maxInt(i8))
+    else
+        std.math.minInt(i8);
+    return @bitCast(result);
+}
+
+pub fn lean_float32_to_int16(a: f32) callconv(.c) u16 {
+    const result: i16 = if (lean_float32_isnan(a) != 0)
+        0
+    else if (-32769.0 < a)
+        (if (a < 32768.0) @intFromFloat(a) else std.math.maxInt(i16))
+    else
+        std.math.minInt(i16);
+    return @bitCast(result);
+}
+
+pub fn lean_float32_to_int32(a: f32) callconv(.c) u32 {
+    const result: i32 = if (lean_float32_isnan(a) != 0)
+        0
+    else if (-2147483649.0 < a)
+        (if (a < 2147483648.0) @intFromFloat(a) else std.math.maxInt(i32))
+    else
+        std.math.minInt(i32);
+    return @bitCast(result);
+}
+
+pub fn lean_float32_to_int64(a: f32) callconv(.c) u64 {
+    const result: i64 = if (lean_float32_isnan(a) != 0)
+        0
+    else if (-9223372036854775809.0 < a)
+        (if (a < 9223372036854775808.0) @intFromFloat(a) else std.math.maxInt(i64))
+    else
+        std.math.minInt(i64);
+    return @bitCast(result);
+}
+
+pub fn lean_float32_to_isize(a: f32) callconv(.c) usize {
+    if (@bitSizeOf(usize) == 64) {
+        return @truncate(lean_float32_to_int64(a));
+    } else {
+        return @as(u32, lean_float32_to_int32(a));
+    }
+}
+
+pub fn lean_float32_to_uint8(a: f32) callconv(.c) u8 {
+    return if (0.0 <= a) (if (a < 256.0) @intFromFloat(a) else std.math.maxInt(u8)) else 0;
+}
+
+pub fn lean_float32_to_uint16(a: f32) callconv(.c) u16 {
+    return if (0.0 <= a) (if (a < 65536.0) @intFromFloat(a) else std.math.maxInt(u16)) else 0;
+}
+
+pub fn lean_float32_to_uint32(a: f32) callconv(.c) u32 {
+    return if (0.0 <= a) (if (a < 4294967296.0) @intFromFloat(a) else std.math.maxInt(u32)) else 0;
+}
+
+pub fn lean_float32_to_uint64(a: f32) callconv(.c) u64 {
+    return if (0.0 <= a) (if (a < 18446744073709551616.0) @intFromFloat(a) else std.math.maxInt(u64)) else 0;
+}
+
+pub fn lean_float32_to_usize(a: f32) callconv(.c) usize {
+    if (@bitSizeOf(usize) == 64) {
+        return lean_float32_to_uint64(a);
+    } else {
+        return lean_float32_to_uint32(a);
+    }
+}
+
+// --- bool / unsigned conversions ---------------------------------------------
+pub fn lean_bool_to_uint8(a: u8) callconv(.c) u8 {
+    return a;
+}
+pub fn lean_bool_to_uint16(a: u8) callconv(.c) u16 {
+    return a;
+}
+pub fn lean_bool_to_uint32(a: u8) callconv(.c) u32 {
+    return a;
+}
+pub fn lean_bool_to_usize(a: u8) callconv(.c) usize {
+    return a;
+}
+pub fn lean_bool_to_int8(a: u8) callconv(.c) u8 {
+    return a;
+}
+pub fn lean_bool_to_int16(a: u8) callconv(.c) u16 {
+    return a;
+}
+pub fn lean_bool_to_int32(a: u8) callconv(.c) u32 {
+    return a;
+}
+pub fn lean_bool_to_int64(a: u8) callconv(.c) u64 {
+    return a;
+}
+pub fn lean_bool_to_isize(a: u8) callconv(.c) usize {
+    return a;
+}
+pub fn lean_uint8_neg(a: u8) callconv(.c) u8 {
+    return 0 -% a;
+}
+pub fn lean_uint16_neg(a: u16) callconv(.c) u16 {
+    return 0 -% a;
+}
+pub fn lean_uint32_neg(a: u32) callconv(.c) u32 {
+    return 0 -% a;
+}
+pub fn lean_uint64_neg(a: u64) callconv(.c) u64 {
+    return 0 -% a;
+}
+pub fn lean_usize_neg(a: usize) callconv(.c) usize {
+    return 0 -% a;
+}
+pub fn lean_uint8_to_float(a: u8) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint16_to_float(a: u16) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint32_to_float(a: u32) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub fn lean_usize_to_float(a: usize) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint8_to_float32(a: u8) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint16_to_float32(a: u16) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint32_to_float32(a: u32) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint64_to_float32(a: u64) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
+pub fn lean_usize_to_float32(a: usize) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
+pub fn lean_uint8_to_usize(a: u8) callconv(.c) usize {
+    return a;
+}
+pub fn lean_uint16_to_usize(a: u16) callconv(.c) usize {
+    return a;
+}
+pub fn lean_usize_to_uint8(a: usize) callconv(.c) u8 {
+    return @truncate(a);
+}
+pub fn lean_usize_to_uint16(a: usize) callconv(.c) u16 {
+    return @truncate(a);
+}
+
+// --- object / array / string helpers -----------------------------------------
+pub fn lean_del_object(o: LeanPtr) callconv(.c) void {
+    if (!lean_is_scalar(o)) lean_free_object(o);
+}
+pub fn lean_void_mk(a: lean_obj_arg) callconv(.c) lean_obj_res {
+    lean_dec(a);
+    return lean_box(0);
+}
+pub fn lean_is_exclusive_obj(o: LeanPtr) callconv(.c) u8 {
+    return @intFromBool(lean_is_exclusive(o));
+}
+pub fn lean_io_result_take_value(r: lean_obj_arg) callconv(.c) lean_obj_res {
+    assert(@src(), lean_io_result_is_ok(r), "lean_io_result_is_ok(r)");
+    const v = lean_ctor_get(r, 0);
+    lean_inc(v);
+    lean_dec(r);
+    return v;
+}
+pub fn lean_runtime_hold(a: b_lean_obj_arg) callconv(.c) lean_obj_res {
+    _ = a;
+    return lean_box(0);
+}
+pub fn lean_usize_mul_would_overflow(a: usize, b: usize) callconv(.c) bool {
+    const r = @mulWithOverflow(a, b);
+    return r[1] != 0;
+}
+pub fn lean_usize_add_would_overflow(a: usize, b: usize) callconv(.c) bool {
+    const r = @addWithOverflow(a, b);
+    return r[1] != 0;
+}
+pub fn lean_alloc_sarray_would_overflow(elem_size: c_uint, capacity: usize) callconv(.c) bool {
+    if (lean_usize_mul_would_overflow(elem_size, capacity)) return true;
+    if (lean_usize_add_would_overflow(@sizeOf(lean_sarray_object), elem_size * capacity)) return true;
+    return false;
+}
+pub fn lean_closure_arg_cptr(o: LeanPtr) callconv(.c) [*c]LeanPtr {
+    return lean_to_closure(o).m_objs();
+}
+pub fn lean_closure_byte_size(o: LeanPtr) callconv(.c) usize {
+    return @sizeOf(lean_closure_object) + @sizeOf(*anyopaque) * lean_closure_num_fixed(o);
+}
+pub fn lean_closure_data_byte_size(o: LeanPtr) callconv(.c) usize {
+    return lean_closure_byte_size(o);
+}
+pub fn lean_array_data_byte_size(o: LeanPtr) callconv(.c) usize {
+    return @sizeOf(lean_array_object) + @sizeOf(*anyopaque) * lean_array_size(o);
+}
+pub fn lean_sarray_data_byte_size(o: LeanPtr) callconv(.c) usize {
+    return @sizeOf(lean_sarray_object) + lean_sarray_elem_size(o) * lean_sarray_size(o);
+}
+pub fn lean_string_data_byte_size(o: LeanPtr) callconv(.c) usize {
+    return @sizeOf(lean_string_object) + lean_string_size(o);
+}
+pub fn lean_string_get_byte_fast(s: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) u8 {
+    const str = lean_string_cstr(s);
+    return str[lean_unbox(i)];
+}
+pub fn lean_set_external_data(o: LeanPtr, data: ?*anyopaque) callconv(.c) LeanPtr {
+    if (lean_is_exclusive(o)) {
+        lean_to_external(o).m_data = data;
+        return o;
+    } else {
+        const o_new = lean_alloc_external(lean_get_external_class(o), data);
+        lean_dec_ref(o);
+        return o_new;
+    }
+}
+pub fn lean_array_uget_borrowed(a: b_lean_obj_arg, i: usize) callconv(.c) b_lean_obj_res {
+    return lean_array_get_core(a, i);
+}
+pub fn lean_array_fget_borrowed(a: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) b_lean_obj_res {
+    return lean_array_get_core(a, lean_unbox(i));
+}
+pub fn lean_array_get_borrowed(def_val: b_lean_obj_arg, a: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) LeanPtr {
+    if (lean_is_scalar(i)) {
+        const idx = lean_unbox(i);
+        if (idx < lean_array_size(a)) {
+            return lean_array_get_core(a, idx);
+        }
+    }
+    lean_inc(def_val);
+    return lean_array_get_panic(def_val);
+}
+
+// --- promises ------------------------------------------------------------------
+pub const lean_promise_object = extern struct {
+    m_header: lean_object,
+    m_result: *lean_task_object,
+};
+pub fn lean_is_promise(o: LeanPtr) callconv(.c) bool {
+    return lean_ptr_tag(o) == LeanPromise;
+}
+pub fn lean_to_promise(o: LeanPtr) callconv(.c) *align(1) lean_promise_object {
+    assert(@src(), lean_is_promise(o), "lean_is_promise(o)");
+    return @ptrCast(o);
+}
+
+// --- Int/Nat euclidean & exact division -----------------------------------------
+pub fn lean_int_ediv(a1: b_lean_obj_arg, a2: b_lean_obj_arg) callconv(.c) lean_obj_res {
+    if (LEAN_LIKELY(lean_is_scalar(a1) and lean_is_scalar(a2))) {
+        const n: i64 = lean_scalar_to_int64(a1);
+        const d: i64 = lean_scalar_to_int64(a2);
+        if (d == 0) return lean_box(0);
+        var q = @divTrunc(n, d);
+        const r = @rem(n, d);
+        if (r < 0) q = if (d > 0) q - 1 else q + 1;
+        return lean_int64_to_int(q);
+    } else {
+        return lean_int_big_ediv(a1, a2);
+    }
+}
+pub fn lean_int_emod(a1: b_lean_obj_arg, a2: b_lean_obj_arg) callconv(.c) lean_obj_res {
+    if (LEAN_LIKELY(lean_is_scalar(a1) and lean_is_scalar(a2))) {
+        const n: i64 = lean_scalar_to_int64(a1);
+        const d: i64 = lean_scalar_to_int64(a2);
+        if (d == 0) return a1;
+        var r = @rem(n, d);
+        if (r < 0) r = if (d > 0) r + d else r - d;
+        return lean_int64_to_int(r);
+    } else {
+        return lean_int_big_emod(a1, a2);
+    }
+}
+pub fn lean_int_div_exact(a1: b_lean_obj_arg, a2: b_lean_obj_arg) callconv(.c) lean_obj_res {
+    if (LEAN_LIKELY(lean_is_scalar(a1) and lean_is_scalar(a2))) {
+        const v1: i64 = lean_scalar_to_int64(a1);
+        const v2: i64 = lean_scalar_to_int64(a2);
+        if (v2 == 0) return lean_box(0);
+        return lean_int64_to_int(@divTrunc(v1, v2));
+    } else {
+        return lean_int_big_div_exact(a1, a2);
+    }
+}
+pub fn lean_nat_div_exact(a1: b_lean_obj_arg, a2: b_lean_obj_arg) callconv(.c) lean_obj_res {
+    if (LEAN_LIKELY(lean_is_scalar(a1) and lean_is_scalar(a2))) {
+        const n1 = lean_unbox(a1);
+        const n2 = lean_unbox(a2);
+        if (n2 == 0) return lean_box(0);
+        return lean_box(n1 / n2);
+    } else {
+        return lean_nat_big_div_exact(a1, a2);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Behavioral tests: exercise the inline translations above against the real
 // Lean runtime (libleanshared). The compile_test only proves that the decls
@@ -2472,4 +3458,14 @@ test "tasks: pure + sync map through the 4.30 task ABI" {
     const t2 = lean_task_map(cl, t, lean_box(0), 1);
     const v = lean_task_get_own(t2);
     try std.testing.expectEqual(@as(usize, 42), lean_unbox(v));
+}
+
+test "compile_all_pub_decls" {
+    // Force semantic analysis of every public declaration (incl. ones not
+    // referenced by the hand-written compile_test above), so removed or
+    // renamed runtime symbols always surface as link errors here.
+    @setEvalBranchQuota(100_000);
+    inline for (comptime std.meta.declarations(@This())) |d| {
+        _ = &@field(@This(), d.name);
+    }
 }
