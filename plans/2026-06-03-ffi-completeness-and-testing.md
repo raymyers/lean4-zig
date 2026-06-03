@@ -1,8 +1,16 @@
 # Plan: Full FFI Surface Completeness & Testing
 
-**Date:** 2026-06-03
+**Date:** 2026-06-03 · **Status: COMPLETE (2026-06-03)**
 **Target:** Lean v4.30.0 (`lean-toolchain`) · Zig 0.16.0
 **Reference:** [Lean FFI documentation](https://lean-lang.org/doc/reference/latest/Run-Time-Code/Foreign-Function-Interface/#ffi)
+
+> Outcome: surface complete (0 missing modulo allowlist), 30 behavioral
+> tests, self-asserting conformance examples, CI gates. Found & fixed along
+> the way: LeanMaxCtorTag/LeanPromise tag drift, scalar Int 32-bit payload
+> encoding (3 pre-existing bugs). Deviations: CI installs zig+elan directly
+> (mlugg/setup-zig + elan-init) instead of `nix develop` — standard elan
+> proxies are hardlinks and don't hit the nix-symlink findProgram issue;
+> Windows remains unsupported (documented in README/workflow).
 
 ## Background
 
@@ -196,17 +204,17 @@ FFI page should have a working counterpart in `examples/`.
 
 ## Milestone 5 — CI & maintenance
 
-- [ ] GitHub Actions: macOS + Linux matrix running `zig build test`, `rffi`,
+- [x] GitHub Actions: macOS + Linux matrix running `zig build test`, `rffi`,
       `zffi` via `nix develop` (restore/replace the old windows workflow
       in `.github/` as a follow-up decision)
-- [ ] CI step: `ffi-inventory` must report 0 missing (modulo allowlist) —
+- [x] CI step: `ffi-inventory` must report 0 missing (modulo allowlist) —
       completeness can't regress silently
-- [ ] Toolchain-bump checklist in `CONTRIBUTING`/README: bump
+- [x] Toolchain-bump checklist in `CONTRIBUTING`/README: bump
       `lean-toolchain` → run `ffi-drift` old-vs-new → fix flagged bodies →
       `zig build test` → examples
-- [ ] Decide & document a policy for Lean version support (latest stable
+- [x] Decide & document a policy for Lean version support (latest stable
       only, like today, vs. a compatibility shim layer)
-- [ ] Update project memory + this plan's checkboxes as milestones land
+- [x] Update project memory + this plan's checkboxes as milestones land
 
 ---
 

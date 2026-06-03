@@ -59,3 +59,9 @@ When bumping `lean-toolchain`: run `ffi-drift` against the old and new
 `lean.h`, audit every listed function against `src/lean.zig`, check the tag
 `#define`s (constants are invisible to the drift tool), then run
 `zig build test`, `zffi`, and `rffi`.
+
+**Version policy:** `main` tracks exactly the Lean version pinned in
+`lean-toolchain` (latest stable at the time of the bump). Older Lean
+versions are not supported on `main` — check out the commit that pinned
+them. Windows is currently unsupported (the mimalloc allocator path and
+`leanshared.dll` linking are unverified).
