@@ -1,0 +1,13 @@
+# Intentional gaps between lean.h and src/lean.zig, with reasons.
+# Read by tools/ffi-inventory.pl. One name per line; '#' starts a comment.
+
+# Parse artifact: `_Atomic(int) * lean_get_rc_mt_addr(...)` makes the naive
+# extractor see a function named _Atomic. Not a real lean.h function.
+_Atomic
+
+# Declared in lean.h but NOT exported by official Lean binaries, which are
+# built with LEAN_MIMALLOC. The bindings allocate small objects via
+# mi_malloc_small/mi_free instead (see lean_alloc_small_object in lean.zig).
+lean_alloc_small
+lean_free_small
+lean_small_mem_size

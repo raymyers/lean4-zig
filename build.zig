@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/lean.zig"),
     });
     lean4FFI(b);
+    try ffiTools(b);
     try runTest(b, target);
     try reverseFFI(b, .{
         .target = target,
@@ -91,6 +92,26 @@ fn reverseFFI(b: *std.Build, info: BuildInfo) !void {
         run_cmd.addPathDir(lib_dir);
     const run_step = b.step("rffi", b.fmt("Run the {s} app", .{exe.name}));
     run_step.dependOn(&run_cmd.step);
+}
+
+fn ffiTools(b: *std.Build) !void {
+    const perl = b.findProgram(&.{"perl"}, &.{}) catch @panic("perl not found!");
+    const lean_h = b.pathJoin(&.{ try lean4Prefix(b), "include", "lean", "lean.h" });
+
+    const inventory = b.addSystemCommand(&.{
+        perl,
+        "tools/ffi-inventory.pl",
+        lean_h,
+        "src/lean.zig",
+        "tools/ffi-allowlist.txt",
+    });
+    const inventory_step = b.step("ffi-inventory", "Check binding completeness against the active toolchain's lean.h");
+    inventory_step.dependOn(&inventory.step);
+
+    const drift = b.addSystemCommand(&.{ perl, "tools/ffi-drift.pl" });
+    if (b.args) |args| drift.addArgs(args);
+    const drift_step = b.step("ffi-drift", "Diff two lean.h versions for semantic drift (zig build ffi-drift -- old.h new.h)");
+    drift_step.dependOn(&drift.step);
 }
 
 fn lakeBuild(b: *std.Build, path: []const u8) *std.Build.Step.Run {

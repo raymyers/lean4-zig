@@ -51,17 +51,20 @@ binaries, which are built with `LEAN_MIMALLOC`. The bindings use
 Make the gap measurable and re-runnable so progress is mechanical, not
 guesswork.
 
-- [ ] Add `tools/ffi-inventory.pl` (or `.zig`): extracts every `static inline`
+- [x] Add `tools/ffi-inventory.pl` (or `.zig`): extracts every `static inline`
       fn and `LEAN_EXPORT` extern from the active toolchain's `lean.h`,
       compares against `pub fn`/`pub extern fn` decls in `src/lean.zig`,
       prints missing/extra/excluded
-- [ ] Add `tools/ffi-drift.pl`: per-function normalized body diff between two
+- [x] Add `tools/ffi-drift.pl`: per-function normalized body diff between two
       `lean.h` versions (the tool that caught the 5 silent 4.30 bugs)
-- [ ] Check in an allowlist file for intentional exclusions with reasons
+- [x] Check in an allowlist file for intentional exclusions with reasons
       (`lean_alloc_small` family; `_Atomic` parse artifact)
-- [ ] Wire both into `zig build` steps (`zig build ffi-inventory`,
+- [x] Wire both into `zig build` steps (`zig build ffi-inventory`,
       `zig build ffi-drift`) so they run without remembering perl incantations
-- [ ] Record baseline counts in this doc
+- [x] Record baseline counts in this doc
+
+> Baseline 2026-06-03 (v4.30.0): 216 missing inline translations, 42 missing
+> externs (after allowlist). `zig build ffi-inventory` fails until both are 0.
 
 ## Milestone 1 — Extern declaration completeness (~42 decls, low risk)
 
