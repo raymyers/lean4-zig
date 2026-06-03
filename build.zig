@@ -33,6 +33,9 @@ fn lean4FFI(b: *std.Build) void {
     const run = b.addSystemCommand(&.{
         "examples/ffi/app/.lake/build/bin/app",
     });
+    // conformance fixture: myAdd, @& borrowed string, enum-like inductive,
+    // boxed Option (see examples/ffi/lib/lean/FFI/Misc.lean)
+    run.expectStdOutEqual("3\n5\n65280\n39\n");
     lakebuild.step.dependOn(&update.step);
     run.step.dependOn(&lakebuild.step);
     const run_cmd = b.step("zffi", "run zig-lib on lean4-app");
@@ -87,6 +90,9 @@ fn reverseFFI(b: *std.Build, info: BuildInfo) !void {
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
+    } else {
+        // conformance fixture: @[export] fns + non-Lean-thread call
+        run_cmd.expectStdErrEqual("output: 6\ndouble: 84\nthread: 7\n");
     }
     if (exe.rootModuleTarget().os.tag == .windows)
         run_cmd.addPathDir(lib_dir);

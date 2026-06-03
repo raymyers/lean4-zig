@@ -14,16 +14,48 @@ Or with Nix: `nix develop` provides zig and elan (see `flake.nix`).
 
 ### How to run
 
-- **FFI**
+Both example targets assert their expected output, so a successful build *is*
+the test.
+
+- **FFI** (zig lib ⇒ lean4 app)
 ```bash
-# default: reverse ffi (zig lib => lean4 app)
-$> zig build zffi
-# output: 3
+$> zig build zffi   # asserts: 3, 5, 65280, 39
 ```
 
-- **Reverse-FFI**
+- **Reverse-FFI** (lean4 lib ⇒ zig app)
 ```bash
-# default: reverse ffi (lean4 lib => zig app)
-$> zig build rffi
-# output: 6
+$> zig build rffi   # asserts: output: 6, double: 84, thread: 7
 ```
+
+- **Binding tests** (run every translated function against `libleanshared`)
+```bash
+$> zig build test
+```
+
+### FFI reference coverage
+
+The examples double as conformance fixtures for the
+[Lean FFI documentation](https://lean-lang.org/doc/reference/latest/Run-Time-Code/Foreign-Function-Interface/#ffi):
+
+| Reference concept | Demonstrated in |
+|---|---|
+| `@[extern]` calling Zig | `examples/ffi/lib/lean/FFI/Add.lean` + `zig/ffi.zig` |
+| `@&` borrowed parameters | `myStringLen` in `examples/ffi/lib/lean/FFI/Misc.lean` |
+| Enum-like inductives (uint8 ctor index) | `colorCode` in `FFI/Misc.lean` |
+| Boxed inductives & ownership (`Option`) | `optionOrZero` in `FFI/Misc.lean` |
+| `@[export]` called from Zig | `my_length`/`my_double` in `examples/reverse-ffi/lib/RFFI.lean` |
+| Initialization protocol & `builtin` flag | `examples/reverse-ffi/app/app.zig` |
+| `lean_initialize_thread`/`lean_finalize_thread` | `lengthFromOtherThread` in `app.zig` |
+| ABI type representations & ownership rules | behavioral tests at the end of `src/lean.zig` |
+
+### Maintenance tooling
+
+```bash
+$> zig build ffi-inventory   # binding completeness vs the toolchain's lean.h
+$> zig build ffi-drift -- old/lean.h new/lean.h   # semantic drift between versions
+```
+
+When bumping `lean-toolchain`: run `ffi-drift` against the old and new
+`lean.h`, audit every listed function against `src/lean.zig`, check the tag
+`#define`s (constants are invisible to the drift tool), then run
+`zig build test`, `zffi`, and `rffi`.

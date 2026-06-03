@@ -175,23 +175,23 @@ against the live runtime.
 The examples are the doc-conformance fixtures: each section of the official
 FFI page should have a working counterpart in `examples/`.
 
-- [ ] **`@[extern]` with borrowing**: extend `examples/ffi` with a Lean
+- [x] **`@[extern]` with borrowing**: extend `examples/ffi` with a Lean
       `@[extern]` binding that uses `@&` borrowed parameters implemented in
       Zig (verifies the borrowed convention crossing the real compiler, not
       just our test harness)
-- [ ] **`@[export]`**: extend `examples/reverse-ffi` with a Lean `@[export]`
+- [x] **`@[export]`**: extend `examples/reverse-ffi` with a Lean `@[export]`
       function (unmangled name) called from Zig alongside the generated
       `initialize_<pkg>_<Module>` flow
-- [ ] **Enum-like inductives**: pass a small Lean inductive (uint8 cidx ABI)
+- [x] **Enum-like inductives**: pass a small Lean inductive (uint8 cidx ABI)
       and an `Option`-style boxed inductive across the boundary both ways
-- [ ] **Initialization protocol**: reverse-ffi app demonstrates correct order —
+- [x] **Initialization protocol**: reverse-ffi app demonstrates correct order —
       optional `lean_setup_args`, `lean_initialize_runtime_module` (or
       `lean_initialize` when Lean-package code is used), module init with
       `builtin = 1`, `lean_io_mark_end_initialization`
-- [ ] **Threads**: a Zig-spawned thread calls into Lean wrapped in
+- [x] **Threads**: a Zig-spawned thread calls into Lean wrapped in
       `lean_initialize_thread`/`lean_finalize_thread`
-- [ ] README: document which example demonstrates which reference section
-- [ ] `zig build zffi` and `zig build rffi` outputs asserted in a script (not
+- [x] README: document which example demonstrates which reference section
+- [x] `zig build zffi` and `zig build rffi` outputs asserted in a script (not
       eyeballed) so CI can gate on them
 
 ## Milestone 5 — CI & maintenance

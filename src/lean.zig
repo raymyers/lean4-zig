@@ -2347,6 +2347,11 @@ test "compile_test" {
 // belong in the application that links them.
 pub extern fn lean_initialize_runtime_module() void;
 pub extern fn lean_initialize() void;
+// Exported by libleanshared and documented in the FFI reference, but not
+// declared in lean.h: thread + argv setup for code embedding the runtime.
+pub extern fn lean_initialize_thread() void;
+pub extern fn lean_finalize_thread() void;
+pub extern fn lean_setup_args(argc: c_int, argv: [*c][*c]u8) void;
 
 // ===========================================================================
 // Lean v4.30 surface additions. Generated to mirror lean.h v4.30.0 exactly;
