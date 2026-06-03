@@ -7,9 +7,7 @@ pub fn build(b: *std.Build) !void {
     const shared = b.option(bool, "Shared", "Linking with libleanshared [default: true]") orelse true;
 
     _ = b.addModule("lean4", .{
-        .root_source_file = .{
-            .path = "src/c.zig",
-        },
+        .root_source_file = b.path("src/lean.zig"),
     });
     lean4FFI(b);
     try runTest(b, target);
@@ -43,41 +41,43 @@ fn lean4FFI(b: *std.Build) void {
 fn reverseFFI(b: *std.Build, info: BuildInfo) !void {
     const exe = b.addExecutable(.{
         .name = "reverse-ffi",
-        .root_source_file = .{ .path = "examples/reverse-ffi/app/app.zig" },
-        .target = info.target,
-        .optimize = info.optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/reverse-ffi/app/app.zig"),
+            .target = info.target,
+            .optimize = info.optimize,
+        }),
     });
     exe.root_module.addImport("lean4", b.modules.get("lean4").?);
-    exe.addLibraryPath(.{ .path = "examples/reverse-ffi/lib/build/lib" });
+    exe.root_module.addLibraryPath(b.path("examples/reverse-ffi/lib/.lake/build/lib"));
     const lean4_prefix = try lean4Prefix(b);
     const lib_dir = lean4LibDir(b, lean4_prefix);
-    exe.addLibraryPath(.{ .path = lib_dir });
+    exe.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
 
-    if (exe.rootModuleTarget().isDarwin()) {
-        exe.addLibraryPath(.{ .path = "/usr/local/lib" });
+    if (exe.rootModuleTarget().os.tag.isDarwin()) {
+        addLibraryPathIfExists(exe.root_module, "/usr/local/lib");
     }
-    exe.addIncludePath(.{ .path = b.pathJoin(&.{ lean4_prefix, "include" }) });
+    exe.root_module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ lean4_prefix, "include" }) });
     exe.step.dependOn(&lakeBuild(b, "examples/reverse-ffi/lib").step);
 
     // static obj
-    exe.addCSourceFile(.{ .file = .{ .path = "examples/reverse-ffi/lib/.lake/build/ir/RFFI.c" }, .flags = &.{} });
+    exe.root_module.addCSourceFile(.{ .file = b.path("examples/reverse-ffi/lib/.lake/build/ir/RFFI.c"), .flags = &.{} });
 
     if (exe.rootModuleTarget().os.tag == .linux and info.linkage == .static) {
-        exe.linkSystemLibrary("leancpp");
-        exe.linkSystemLibrary("leanrt");
-        exe.linkSystemLibrary("Init");
-        exe.linkSystemLibrary("Lean");
-        exe.linkSystemLibrary("gmp");
-        exe.linkLibCpp(); // libc++ + libunwind + libc
+        exe.root_module.linkSystemLibrary("leancpp", .{});
+        exe.root_module.linkSystemLibrary("leanrt", .{});
+        exe.root_module.linkSystemLibrary("Init", .{});
+        exe.root_module.linkSystemLibrary("Lean", .{});
+        exe.root_module.linkSystemLibrary("gmp", .{});
+        exe.root_module.link_libcpp = true; // libc++ + libunwind + libc
     } else {
         if (exe.rootModuleTarget().os.tag == .windows) {
             // search library name - no pkg-config
-            exe.linkSystemLibrary2("leanshared.dll", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("leanshared.dll", .{ .use_pkg_config = .no });
         } else {
             // detect library w/ pkg-config
-            exe.linkSystemLibrary("leanshared");
+            exe.root_module.linkSystemLibrary("leanshared", .{});
         }
-        exe.linkLibC();
+        exe.root_module.link_libc = true;
     }
 
     b.installArtifact(exe);
@@ -103,42 +103,45 @@ fn lakeBuild(b: *std.Build, path: []const u8) *std.Build.Step.Run {
     return run;
 }
 
+// skip nonexistent system dirs (e.g. /usr/local/lib on arm64 macOS) so the
+// compiler doesn't warn, which the build runner treats as a step failure
+fn addLibraryPathIfExists(m: *std.Build.Module, dir: []const u8) void {
+    std.Io.Dir.accessAbsolute(m.owner.graph.io, dir, .{}) catch return;
+    m.addLibraryPath(.{ .cwd_relative = dir });
+}
+
 fn lean4LibDir(b: *std.Build, lean4_prefix: []const u8) []const u8 {
     // for windows/mingw need "lib.dll.a" linking
     return b.pathJoin(&.{ lean4_prefix, "lib", "lean" });
 }
 fn lean4Prefix(b: *std.Build) ![]const u8 {
     const lean = try b.findProgram(&.{"lean"}, &.{});
-    const run = try std.ChildProcess.run(.{
-        .allocator = b.allocator,
-        .argv = &.{
-            lean,
-            "--print-prefix",
-        },
-    });
-    var out = std.mem.splitSequence(u8, run.stdout, "\n"); // remove newline
+    const stdout = b.run(&.{ lean, "--print-prefix" });
+    var out = std.mem.splitSequence(u8, stdout, "\n"); // remove newline
     return out.first();
 }
 
 fn runTest(b: *std.Build, target: std.Build.ResolvedTarget) !void {
     const libTests = b.addTest(.{
         .name = "lean_test",
-        .target = target,
-        .optimize = .Debug,
-        .root_source_file = .{ .path = "src/c.zig" },
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lean.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
     });
     const lib_dir = lean4LibDir(b, try lean4Prefix(b));
-    libTests.addLibraryPath(.{ .path = lib_dir });
+    libTests.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
 
-    if (libTests.rootModuleTarget().isDarwin()) {
-        libTests.addLibraryPath(.{ .path = "/usr/local/lib" });
+    if (libTests.rootModuleTarget().os.tag.isDarwin()) {
+        addLibraryPathIfExists(libTests.root_module, "/usr/local/lib");
     }
     if (libTests.rootModuleTarget().os.tag == .windows) {
-        libTests.linkSystemLibrary2("leanshared.dll", .{ .use_pkg_config = .no });
+        libTests.root_module.linkSystemLibrary("leanshared.dll", .{ .use_pkg_config = .no });
     } else {
-        libTests.linkSystemLibrary("leanshared");
+        libTests.root_module.linkSystemLibrary("leanshared", .{});
     }
-    libTests.linkLibC();
+    libTests.root_module.link_libc = true;
     const run_libTests = b.addRunArtifact(libTests);
     if (libTests.rootModuleTarget().os.tag == .windows)
         run_libTests.addPathDir(lib_dir);
@@ -148,7 +151,7 @@ fn runTest(b: *std.Build, target: std.Build.ResolvedTarget) !void {
 }
 
 const BuildInfo = struct {
-    linkage: std.Build.Step.Compile.Linkage,
+    linkage: std.builtin.LinkMode,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 };

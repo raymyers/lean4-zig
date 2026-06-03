@@ -4,17 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
+        .linkage = .static,
         .name = "zffi",
-        .root_source_file = .{ .path = "zig/ffi.zig" },
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("zig/ffi.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     lib.pie = true;
     lib.root_module.addAnonymousImport("lean4", .{
-        .root_source_file = .{
-            .path = "../../../src/c.zig",
-        },
+        .root_source_file = b.path("../../../src/lean.zig"),
     });
     switch (optimize) {
         .Debug, .ReleaseSafe => lib.bundle_compiler_rt = true,
