@@ -163,6 +163,17 @@ pub extern fn lean_internal_panic(msg: [*:0]const u8) noreturn;
 pub extern fn lean_internal_panic_out_of_memory() noreturn;
 pub extern fn lean_internal_panic_unreachable() noreturn;
 pub extern fn lean_internal_panic_rc_overflow() noreturn;
+pub extern fn lean_internal_panic_overflow() noreturn;
+pub fn lean_usize_mul_checked(a: usize, b: usize) callconv(.c) usize {
+    const r = @mulWithOverflow(a, b);
+    if (LEAN_UNLIKELY(r[1] != 0)) lean_internal_panic_overflow();
+    return r[0];
+}
+pub fn lean_usize_add_checked(a: usize, b: usize) callconv(.c) usize {
+    const r = @addWithOverflow(a, b);
+    if (LEAN_UNLIKELY(r[1] != 0)) lean_internal_panic_overflow();
+    return r[0];
+}
 pub fn lean_align(v: usize, a: usize) callconv(.c) usize {
     return ((v / a) * a) + (a * @intFromBool((v % a) != 0));
 }
@@ -343,7 +354,8 @@ pub fn lean_set_st_header(o: LeanPtr, tag: c_uint, other: c_uint) callconv(.c) v
     o.m_rc = 1;
     o.m_tag = @intCast(tag);
     o.m_other = @intCast(other);
-    o.m_cs_sz = 0;
+    // do NOT zero m_cs_sz: with the mimalloc runtime it carries the
+    // allocation size stored by lean_alloc_small_object
 }
 pub fn lean_set_non_heap_header(o: LeanPtr, sz: usize, tag: c_uint, other: c_uint) callconv(.c) void {
     assert(@src(), sz > 0, "sz > 0");
@@ -371,7 +383,7 @@ pub fn lean_ctor_scalar_cptr(o: LeanPtr) callconv(.c) [*]u8 {
 }
 pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) callconv(.c) LeanPtr {
     assert(@src(), tag <= LeanMaxCtorTag and num_objs < LEAN_MAX_CTOR_FIELDS and scalar_sz < LEAN_MAX_CTOR_SCALARS_SIZE, "tag <= LeanMaxCtorTag && num_objs < LEAN_MAX_CTOR_FIELDS && scalar_sz < LEAN_MAX_CTOR_SCALARS_SIZE");
-    const o = lean_alloc_ctor_memory(@sizeOf(lean_ctor_object) + @sizeOf(*anyopaque) * num_objs + scalar_sz);
+    const o = lean_alloc_ctor_memory(@intCast(lean_usize_add_checked(lean_usize_add_checked(@sizeOf(lean_ctor_object), lean_usize_mul_checked(@sizeOf(*anyopaque), num_objs)), scalar_sz)));
     lean_set_st_header(o, tag, num_objs);
     return o;
 }
@@ -456,7 +468,7 @@ pub fn lean_closure_cptr(o: LeanPtr) callconv(.c) [*]LeanPtr {
 pub fn lean_alloc_closure(fun: ?*anyopaque, arity: c_uint, num_fixed: c_uint) callconv(.c) lean_obj_res {
     assert(@src(), arity > 0, "arity > 0");
     assert(@src(), num_fixed < arity, "num_fixed < arity");
-    const o: *lean_closure_object = @ptrCast(@alignCast(lean_alloc_small_object(@sizeOf(lean_closure_object) + @sizeOf(*anyopaque) * num_fixed)));
+    const o: *lean_closure_object = @ptrCast(@alignCast(lean_alloc_object(lean_usize_add_checked(@sizeOf(lean_closure_object), lean_usize_mul_checked(@sizeOf(*anyopaque), num_fixed)))));
     lean_set_st_header(@as(LeanPtr, @ptrCast(o)), LeanClosure, 0);
     o.m_fun = fun;
     o.m_arity = @truncate(arity);
@@ -490,7 +502,7 @@ pub extern fn lean_apply_16(f: LeanPtr, a1: LeanPtr, a2: LeanPtr, a3: LeanPtr, a
 pub extern fn lean_apply_n(f: LeanPtr, n: c_uint, args: [*]LeanPtr) LeanPtr;
 pub extern fn lean_apply_m(f: LeanPtr, n: c_uint, args: [*]LeanPtr) LeanPtr;
 pub fn lean_alloc_array(size: usize, capacity: usize) callconv(.c) lean_obj_res {
-    const o: *lean_array_object = @ptrCast(@alignCast(lean_alloc_object(@sizeOf(lean_array_object) + @sizeOf(*anyopaque) * capacity)));
+    const o: *lean_array_object = @ptrCast(@alignCast(lean_alloc_object(lean_usize_add_checked(@sizeOf(lean_array_object), lean_usize_mul_checked(@sizeOf(*anyopaque), capacity)))));
     lean_set_st_header(@as(LeanPtr, @ptrCast(o)), LeanArray, 0);
     o.m_size = size;
     o.m_capacity = capacity;
@@ -551,23 +563,21 @@ pub fn lean_array_fget(a: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) lean_o
     return lean_array_uget(a, lean_unbox(i));
 }
 pub extern fn lean_array_get_panic(def_val: lean_obj_arg) lean_obj_res;
-pub fn lean_array_get(def_val: lean_obj_arg, a: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) LeanPtr {
+pub fn lean_array_get(def_val: b_lean_obj_arg, a: b_lean_obj_arg, i: b_lean_obj_arg) callconv(.c) LeanPtr {
     if (lean_is_scalar(i)) {
         const idx = lean_unbox(i);
         if (idx < lean_array_size(a)) {
-            lean_dec(def_val);
             return lean_array_uget(a, idx);
         }
     }
+    lean_inc(def_val);
     return lean_array_get_panic(def_val);
 }
 pub extern fn lean_copy_expand_array(a: lean_obj_arg, expand: bool) lean_obj_res;
-pub fn lean_copy_array(a: lean_obj_arg) callconv(.c) lean_obj_res {
-    return lean_copy_expand_array(a, false);
-}
+pub extern fn lean_copy_expand_array_nonlinear(a: lean_obj_arg, expand: bool) lean_obj_res;
 pub fn lean_ensure_exclusive_array(a: lean_obj_arg) callconv(.c) lean_obj_res {
     if (lean_is_exclusive(a)) return a;
-    return lean_copy_array(a);
+    return lean_copy_expand_array_nonlinear(a, false);
 }
 pub fn lean_array_uset(a: lean_obj_arg, i: usize, v: lean_obj_arg) callconv(.c) LeanPtr {
     const r = lean_ensure_exclusive_array(a);
@@ -619,7 +629,7 @@ pub fn lean_array_swap(a: lean_obj_arg, i: b_lean_obj_arg, j: b_lean_obj_arg) ca
 pub extern fn lean_array_push(a: lean_obj_arg, v: lean_obj_arg) LeanPtr;
 pub extern fn lean_mk_array(n: lean_obj_arg, v: lean_obj_arg) LeanPtr;
 pub fn lean_alloc_sarray(elem_size: c_uint, size: usize, capacity: usize) callconv(.c) lean_obj_res {
-    const o: *lean_sarray_object = @ptrCast(@alignCast(lean_alloc_object(@sizeOf(lean_sarray_object) + elem_size * capacity)));
+    const o: *lean_sarray_object = @ptrCast(@alignCast(lean_alloc_object(lean_usize_add_checked(@sizeOf(lean_sarray_object), lean_usize_mul_checked(elem_size, capacity)))));
     lean_set_st_header(@as(LeanPtr, @ptrCast(o)), LeanScalarArray, elem_size);
     o.m_size = size;
     o.m_capacity = capacity;
@@ -741,7 +751,7 @@ pub fn lean_float_array_set(a: lean_obj_arg, i: b_lean_obj_arg, d: f64) callconv
     }
 }
 pub fn lean_alloc_string(size: usize, capacity: usize, len: usize) callconv(.c) lean_obj_res {
-    const o: *lean_string_object = @ptrCast(@alignCast(lean_alloc_object(@sizeOf(lean_string_object) +% capacity)));
+    const o: *lean_string_object = @ptrCast(@alignCast(lean_alloc_object(lean_usize_add_checked(@sizeOf(lean_string_object), capacity))));
     lean_set_st_header(@as(LeanPtr, @ptrCast(o)), LeanString, 0);
     o.m_size = size;
     o.m_capacity = capacity;
@@ -852,13 +862,13 @@ pub fn lean_task_spawn(c: lean_obj_arg, prio: lean_obj_arg) callconv(.c) lean_ob
     return lean_task_spawn_core(c, @intCast(lean_unbox(prio)), false);
 }
 pub extern fn lean_task_pure(a: lean_obj_arg) lean_obj_res;
-pub extern fn lean_task_bind_core(x: lean_obj_arg, f: lean_obj_arg, prio: c_uint, keep_alive: bool) lean_obj_res;
-pub fn lean_task_bind(x: lean_obj_arg, f: lean_obj_arg, prio: lean_obj_arg) callconv(.c) lean_obj_res {
-    return lean_task_bind_core(x, f, @intCast(lean_unbox(prio)), false);
+pub extern fn lean_task_bind_core(x: lean_obj_arg, f: lean_obj_arg, prio: c_uint, sync: bool, keep_alive: bool) lean_obj_res;
+pub fn lean_task_bind(x: lean_obj_arg, f: lean_obj_arg, prio: lean_obj_arg, sync: u8) callconv(.c) lean_obj_res {
+    return lean_task_bind_core(x, f, @intCast(lean_unbox(prio)), sync != 0, false);
 }
-pub extern fn lean_task_map_core(f: lean_obj_arg, t: lean_obj_arg, prio: c_uint, keep_alive: bool) lean_obj_res;
-pub fn lean_task_map(f: lean_obj_arg, t: lean_obj_arg, prio: lean_obj_arg) callconv(.c) lean_obj_res {
-    return lean_task_map_core(f, t, @intCast(lean_unbox(prio)), false);
+pub extern fn lean_task_map_core(f: lean_obj_arg, t: lean_obj_arg, prio: c_uint, sync: bool, keep_alive: bool) lean_obj_res;
+pub fn lean_task_map(f: lean_obj_arg, t: lean_obj_arg, prio: lean_obj_arg, sync: u8) callconv(.c) lean_obj_res {
+    return lean_task_map_core(f, t, @intCast(lean_unbox(prio)), sync != 0, false);
 }
 pub extern fn lean_task_get(t: b_lean_obj_arg) b_lean_obj_res;
 pub fn lean_task_get_own(t: lean_obj_arg) callconv(.c) lean_obj_res {
@@ -1660,15 +1670,13 @@ pub fn lean_io_result_get_error(r: b_lean_obj_arg) callconv(.c) b_lean_obj_res {
 pub extern fn lean_io_result_show_error(r: b_lean_obj_arg) void;
 pub extern fn lean_io_mark_end_initialization() void;
 pub fn lean_io_result_mk_ok(a: lean_obj_arg) callconv(.c) lean_obj_res {
-    const r = lean_alloc_ctor(0, 2, 0);
+    const r = lean_alloc_ctor(0, 1, 0);
     lean_ctor_set(r, 0, a);
-    lean_ctor_set(r, 1, lean_box(0));
     return r;
 }
 pub fn lean_io_result_mk_error(e: lean_obj_arg) callconv(.c) lean_obj_res {
-    const r = lean_alloc_ctor(1, 2, 0);
+    const r = lean_alloc_ctor(1, 1, 0);
     lean_ctor_set(r, 0, e);
-    lean_ctor_set(r, 1, lean_box(0));
     return r;
 }
 pub extern fn lean_mk_io_error_already_exists(u32, lean_obj_arg) lean_obj_res;
@@ -1940,7 +1948,10 @@ test "compile_test" {
     _ = &lean_array_get_panic;
     _ = &lean_array_get;
     _ = &lean_copy_expand_array;
-    _ = &lean_copy_array;
+    _ = &lean_copy_expand_array_nonlinear;
+    _ = &lean_usize_add_checked;
+    _ = &lean_usize_mul_checked;
+    _ = &lean_internal_panic_overflow;
     _ = &lean_ensure_exclusive_array;
     _ = &lean_array_uset;
     _ = &lean_array_fset;
@@ -2333,3 +2344,132 @@ test "compile_test" {
 // belong in the application that links them.
 pub extern fn lean_initialize_runtime_module() void;
 pub extern fn lean_initialize() void;
+
+// ---------------------------------------------------------------------------
+// Behavioral tests: exercise the inline translations above against the real
+// Lean runtime (libleanshared). The compile_test only proves that the decls
+// compile and that extern symbols link; these prove the translated semantics
+// still match the runtime they execute against.
+
+var test_runtime_initialized = false;
+fn testEnsureRuntime() void {
+    if (!test_runtime_initialized) {
+        lean_initialize_runtime_module();
+        lean_io_mark_end_initialization();
+        test_runtime_initialized = true;
+    }
+}
+
+test "box/unbox roundtrip for scalars" {
+    const o = lean_box(42);
+    try std.testing.expect(lean_is_scalar(o));
+    try std.testing.expectEqual(@as(usize, 42), lean_unbox(o));
+}
+
+test "small object allocation records its size (mimalloc runtime)" {
+    testEnsureRuntime();
+    const o = lean_alloc_small_object(24);
+    try std.testing.expectEqual(@as(c_uint, 24), lean_small_object_size(o));
+    lean_free_small_object(o);
+}
+
+test "ctor alloc/set/get, header fields, refcount, free via runtime dec" {
+    testEnsureRuntime();
+    const o = lean_alloc_ctor(3, 2, 0);
+    lean_ctor_set(o, 0, lean_box(7));
+    lean_ctor_set(o, 1, lean_box(9));
+    try std.testing.expectEqual(@as(u8, 3), lean_ptr_tag(o));
+    try std.testing.expectEqual(@as(c_uint, 2), lean_ctor_num_objs(o));
+    try std.testing.expectEqual(@as(usize, 7), lean_unbox(lean_ctor_get(o, 0)));
+    try std.testing.expectEqual(@as(usize, 9), lean_unbox(lean_ctor_get(o, 1)));
+    try std.testing.expect(lean_is_st(o));
+    lean_inc(o);
+    try std.testing.expectEqual(@as(c_int, 2), o.m_rc);
+    lean_dec(o);
+    try std.testing.expectEqual(@as(c_int, 1), o.m_rc);
+    // final dec frees through the runtime: it must accept our mimalloc allocation
+    lean_dec(o);
+}
+
+test "io results use the 4.30 single-field ctor shape" {
+    testEnsureRuntime();
+    const ok = lean_io_result_mk_ok(lean_box(5));
+    try std.testing.expect(lean_io_result_is_ok(ok));
+    try std.testing.expectEqual(@as(c_uint, 1), lean_ctor_num_objs(ok));
+    try std.testing.expectEqual(@as(usize, 5), lean_unbox(lean_io_result_get_value(ok)));
+    lean_dec(ok);
+
+    const err = lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("expected test error")));
+    try std.testing.expect(lean_io_result_is_error(err));
+    lean_dec(err);
+}
+
+test "strings: runtime-allocated object, inline accessors" {
+    testEnsureRuntime();
+    const s = lean_mk_string("hello!");
+    try std.testing.expect(lean_is_string(s));
+    try std.testing.expectEqual(@as(usize, 7), lean_string_size(s)); // includes NUL
+    try std.testing.expectEqual(@as(usize, 6), lean_string_len(s));
+    try std.testing.expectEqualStrings("hello!", std.mem.span(lean_string_cstr(s)));
+    const s2 = lean_string_push(s, 'x'); // consumes s
+    try std.testing.expectEqualStrings("hello!x", std.mem.span(lean_string_cstr(s2)));
+    lean_dec(s2);
+}
+
+test "arrays: alloc via bindings, push via runtime, borrowed def_val" {
+    testEnsureRuntime();
+    var a = lean_mk_empty_array(); // lean_alloc_array(0, 0) from the bindings
+    a = lean_array_push(a, lean_box(1));
+    a = lean_array_push(a, lean_box(2));
+    try std.testing.expectEqual(@as(usize, 2), lean_array_size(a));
+    const hit = lean_array_get(lean_box(99), a, lean_box(1));
+    try std.testing.expectEqual(@as(usize, 2), lean_unbox(hit));
+    // def_val is borrowed since 4.30: its refcount must be untouched on a hit
+    const def = lean_mk_string("default");
+    try std.testing.expectEqual(@as(c_int, 1), def.m_rc);
+    _ = lean_array_get(def, a, lean_box(0));
+    try std.testing.expectEqual(@as(c_int, 1), def.m_rc);
+    lean_dec(def);
+    lean_dec(a);
+}
+
+test "closures: alloc via bindings, apply via runtime" {
+    testEnsureRuntime();
+    const S = struct {
+        fn add3(x: lean_obj_arg) callconv(.c) lean_obj_res {
+            return lean_box(lean_unbox(x) + 3);
+        }
+    };
+    const cl = lean_alloc_closure(@ptrCast(@constCast(&S.add3)), 1, 0);
+    const r = lean_apply_1(cl, lean_box(4)); // consumes cl
+    try std.testing.expectEqual(@as(usize, 7), lean_unbox(r));
+}
+
+test "nat arithmetic across the bignum boundary" {
+    testEnsureRuntime();
+    const big = lean_cstr_to_nat("36893488147419103232"); // 2^65
+    try std.testing.expect(!lean_is_scalar(big));
+    const one = lean_unsigned_to_nat(1);
+    const sum = lean_nat_add(big, one);
+    const expected = lean_cstr_to_nat("36893488147419103233");
+    try std.testing.expect(lean_nat_dec_eq(sum, expected) != 0);
+    lean_dec(big);
+    lean_dec(one);
+    lean_dec(sum);
+    lean_dec(expected);
+}
+
+test "tasks: pure + sync map through the 4.30 task ABI" {
+    testEnsureRuntime();
+    lean_init_task_manager();
+    const S = struct {
+        fn double(x: lean_obj_arg) callconv(.c) lean_obj_res {
+            return lean_box(lean_unbox(x) * 2);
+        }
+    };
+    const t = lean_task_pure(lean_box(21));
+    const cl = lean_alloc_closure(@ptrCast(@constCast(&S.double)), 1, 0);
+    const t2 = lean_task_map(cl, t, lean_box(0), 1);
+    const v = lean_task_get_own(t2);
+    try std.testing.expectEqual(@as(usize, 42), lean_unbox(v));
+}
