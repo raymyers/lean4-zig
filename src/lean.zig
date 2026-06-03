@@ -171,21 +171,23 @@ pub fn lean_get_slot_idx(sz: c_uint) callconv(.c) c_uint {
     assert(@src(), lean_align(sz, LEAN_OBJECT_SIZE_DELTA) == sz, "lean_align(sz, LEAN_OBJECT_SIZE_DELTA) == sz");
     return sz / LEAN_OBJECT_SIZE_DELTA - 1;
 }
-pub extern fn lean_alloc_small(sz: c_uint, slot_idx: c_uint) ?*anyopaque;
-pub extern fn lean_free_small(p: *anyopaque) void;
-pub extern fn lean_small_mem_size(p: *anyopaque) c_uint;
 pub extern fn lean_inc_heartbeat() void;
+// Official Lean releases bundle mimalloc into the runtime (LEAN_MIMALLOC);
+// lean_alloc_small/lean_free_small/lean_small_mem_size are no longer exported.
+extern fn mi_malloc_small(sz: usize) ?*anyopaque;
+extern fn mi_free(p: ?*anyopaque) void;
 pub fn lean_alloc_small_object(sz: c_uint) callconv(.c) LeanPtr {
+    lean_inc_heartbeat();
+    // HACK(upstream): emulate behavior of small allocator to avoid `leangz` breakage
     const sz1: c_uint = @truncate(lean_align(sz, LEAN_OBJECT_SIZE_DELTA));
-    const slot_idx = lean_get_slot_idx(sz1);
-    assert(@src(), sz1 <= LEAN_MAX_SMALL_OBJECT_SIZE, "sz <= LEAN_MAX_SMALL_OBJECT_SIZE");
-    return @as(LeanPtr, @ptrCast(lean_alloc_small(sz1, slot_idx)));
+    const mem = mi_malloc_small(sz1) orelse lean_internal_panic_out_of_memory();
+    const o: *lean_object = @ptrCast(@alignCast(mem));
+    o.m_cs_sz = @intCast(sz1);
+    return @ptrCast(o);
 }
 pub fn lean_alloc_ctor_memory(sz: c_uint) callconv(.c) LeanPtr {
     const sz1: c_uint = @truncate(lean_align(sz, LEAN_OBJECT_SIZE_DELTA));
-    const slot_idx = lean_get_slot_idx(sz1);
-    assert(@src(), sz1 <= LEAN_MAX_SMALL_OBJECT_SIZE, "sz1 <= LEAN_MAX_SMALL_OBJECT_SIZE");
-    const r: LeanPtr = @ptrCast(lean_alloc_small(sz1, slot_idx));
+    const r = lean_alloc_small_object(sz);
     if (sz1 > sz) {
         const end: [*]usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(r)) + sz1));
         (end - 1)[0] = 0;
@@ -193,10 +195,11 @@ pub fn lean_alloc_ctor_memory(sz: c_uint) callconv(.c) LeanPtr {
     return r;
 }
 pub fn lean_small_object_size(o: LeanPtr) callconv(.c) c_uint {
-    return lean_small_mem_size(o);
+    return @as(*lean_object, @alignCast(o)).m_cs_sz;
 }
 pub fn lean_free_small_object(o: LeanPtr) callconv(.c) void {
-    lean_free_small(o);
+    // must NOT use m_cs_sz here: it is repurposed for the deletion list
+    mi_free(@ptrCast(o));
 }
 pub extern fn lean_alloc_object(sz: usize) LeanPtr;
 pub extern fn lean_free_object(o: LeanPtr) void;
@@ -222,21 +225,16 @@ pub fn lean_has_rc(o: LeanPtr) callconv(.c) bool {
 pub fn lean_get_rc_mt_addr(o: LeanPtr) callconv(.c) *c_int { // atomic
     return &@as(*lean_object, @alignCast(o)).m_rc;
 }
-pub extern fn lean_inc_ref_cold(o: LeanPtr) void;
-pub extern fn lean_inc_ref_n_cold(o: LeanPtr, n: c_uint) void;
-pub fn lean_inc_ref(o: LeanPtr) callconv(.c) void {
-    if (LEAN_LIKELY(lean_is_st(o))) {
-        o.m_rc += 1;
-    } else if (o.m_rc != 0) {
-        lean_inc_ref_cold(o);
-    }
-}
 pub fn lean_inc_ref_n(o: LeanPtr, n: usize) callconv(.c) void {
     if (LEAN_LIKELY(lean_is_st(o))) {
         o.m_rc += @intCast(n);
     } else if (o.m_rc != 0) {
-        lean_inc_ref_n_cold(o, @intCast(n));
+        // MT refcounts are negative, so incrementing means an atomic subtract
+        _ = @atomicRmw(c_int, lean_get_rc_mt_addr(o), .Sub, @intCast(n), .monotonic);
     }
+}
+pub fn lean_inc_ref(o: LeanPtr) callconv(.c) void {
+    lean_inc_ref_n(o, 1);
 }
 pub extern fn lean_dec_ref_cold(o: LeanPtr) void;
 pub fn lean_dec_ref(o: LeanPtr) callconv(.c) void {
@@ -1267,14 +1265,6 @@ pub fn lean_uint8_shift_right(a: u8, b: u8) callconv(.c) u8 {
 pub fn lean_uint8_complement(a: u8) callconv(.c) u8 {
     return ~a;
 }
-pub fn lean_uint8_modn(a1: u8, a2: b_lean_obj_arg) callconv(.c) u8 {
-    if (LEAN_LIKELY(lean_is_scalar(a2))) {
-        const n2 = lean_unbox(a2);
-        return if (n2 == 0) a1 else a1 % @as(u8, @truncate(n2));
-    } else {
-        return a1;
-    }
-}
 pub fn lean_uint8_log2(x: u8) callconv(.c) u8 {
     var res: u8 = 0;
     var a = x;
@@ -1349,14 +1339,6 @@ pub fn lean_uint16_shift_right(a: u16, b: u16) callconv(.c) u16 {
 }
 pub fn lean_uint16_complement(a: u16) callconv(.c) u16 {
     return ~a;
-}
-pub fn lean_uint16_modn(a1: u16, a2: b_lean_obj_arg) callconv(.c) u16 {
-    if (LEAN_LIKELY(lean_is_scalar(a2))) {
-        const n2 = lean_unbox(a2);
-        return if (n2 == 0) a1 else a1 % @as(u16, @truncate(n2));
-    } else {
-        return a1;
-    }
 }
 pub fn lean_uint16_log2(x: u16) callconv(.c) u16 {
     var res: u16 = 0;
@@ -1433,17 +1415,6 @@ pub fn lean_uint32_shift_right(a: u32, b: u32) callconv(.c) u32 {
 pub fn lean_uint32_complement(a: u32) callconv(.c) u32 {
     return ~a;
 }
-pub extern fn lean_uint32_big_modn(a1: u32, a2: b_lean_obj_arg) u32;
-pub fn lean_uint32_modn(a1: u32, a2: b_lean_obj_arg) callconv(.c) u32 {
-    if (LEAN_LIKELY(lean_is_scalar(a2))) {
-        const n2 = lean_unbox(a2);
-        return if (n2 == 0) a1 else a1 % @as(u32, @truncate(n2));
-    } else if (@sizeOf(*anyopaque) == 4) {
-        return lean_uint32_big_modn(a1, a2);
-    } else {
-        return a1;
-    }
-}
 pub fn lean_uint32_log2(x: u32) callconv(.c) u32 {
     var res: u32 = 0;
     var a = x;
@@ -1518,15 +1489,6 @@ pub fn lean_uint64_shift_right(a: u64, b: u64) callconv(.c) u64 {
 }
 pub fn lean_uint64_complement(a: u64) callconv(.c) u64 {
     return ~a;
-}
-pub extern fn lean_uint64_big_modn(a1: u64, a2: b_lean_obj_arg) u64;
-pub fn lean_uint64_modn(a1: u64, a2: b_lean_obj_arg) callconv(.c) u64 {
-    if (LEAN_LIKELY(lean_is_scalar(a2))) {
-        const n2 = lean_unbox(a2);
-        return if (n2 == 0) a1 else a1 % n2;
-    } else {
-        return lean_uint64_big_modn(a1, a2);
-    }
 }
 pub fn lean_uint64_log2(x: u64) callconv(.c) u64 {
     var res: u64 = 0;
@@ -1603,15 +1565,6 @@ pub fn lean_usize_shift_right(a: usize, b: usize) callconv(.c) usize {
 }
 pub fn lean_usize_complement(a: usize) callconv(.c) usize {
     return ~a;
-}
-pub extern fn lean_usize_big_modn(a1: usize, a2: b_lean_obj_arg) usize;
-pub fn lean_usize_modn(a1: usize, a2: b_lean_obj_arg) callconv(.c) usize {
-    if (LEAN_LIKELY(lean_is_scalar(a2))) {
-        const n2 = lean_unbox(a2);
-        return if (n2 == 0) a1 else a1 % n2;
-    } else {
-        return lean_usize_big_modn(a1, a2);
-    }
 }
 pub fn lean_usize_log2(x: usize) callconv(.c) usize {
     var res: usize = 0;
@@ -1873,9 +1826,6 @@ test "compile_test" {
     _ = &lean_internal_panic_rc_overflow;
     _ = &lean_align;
     _ = &lean_get_slot_idx;
-    _ = &lean_alloc_small;
-    _ = &lean_free_small;
-    _ = &lean_small_mem_size;
     _ = &lean_inc_heartbeat;
     _ = &lean_alloc_small_object;
     _ = &lean_alloc_ctor_memory;
@@ -1891,8 +1841,6 @@ test "compile_test" {
     _ = &lean_is_persistent;
     _ = &lean_has_rc;
     _ = &lean_get_rc_mt_addr;
-    _ = &lean_inc_ref_cold;
-    _ = &lean_inc_ref_n_cold;
     _ = &lean_inc_ref;
     _ = &lean_inc_ref_n;
     _ = &lean_dec_ref_cold;
@@ -2188,7 +2136,6 @@ test "compile_test" {
     _ = &lean_uint8_shift_left;
     _ = &lean_uint8_shift_right;
     _ = &lean_uint8_complement;
-    _ = &lean_uint8_modn;
     _ = &lean_uint8_log2;
     _ = &lean_uint8_dec_eq;
     _ = &lean_uint8_dec_lt;
@@ -2211,7 +2158,6 @@ test "compile_test" {
     _ = &lean_uint16_shift_left;
     _ = &lean_uint16_shift_right;
     _ = &lean_uint16_complement;
-    _ = &lean_uint16_modn;
     _ = &lean_uint16_log2;
     _ = &lean_uint16_dec_eq;
     _ = &lean_uint16_dec_lt;
@@ -2234,8 +2180,6 @@ test "compile_test" {
     _ = &lean_uint32_shift_left;
     _ = &lean_uint32_shift_right;
     _ = &lean_uint32_complement;
-    _ = &lean_uint32_big_modn;
-    _ = &lean_uint32_modn;
     _ = &lean_uint32_log2;
     _ = &lean_uint32_dec_eq;
     _ = &lean_uint32_dec_lt;
@@ -2258,8 +2202,6 @@ test "compile_test" {
     _ = &lean_uint64_shift_left;
     _ = &lean_uint64_shift_right;
     _ = &lean_uint64_complement;
-    _ = &lean_uint64_big_modn;
-    _ = &lean_uint64_modn;
     _ = &lean_uint64_log2;
     _ = &lean_uint64_dec_eq;
     _ = &lean_uint64_dec_lt;
@@ -2283,8 +2225,6 @@ test "compile_test" {
     _ = &lean_usize_shift_left;
     _ = &lean_usize_shift_right;
     _ = &lean_usize_complement;
-    _ = &lean_usize_big_modn;
-    _ = &lean_usize_modn;
     _ = &lean_usize_log2;
     _ = &lean_usize_dec_eq;
     _ = &lean_usize_dec_lt;
@@ -2387,9 +2327,9 @@ test "compile_test" {
     _ = &LEAN_BYTE;
 }
 
-// Extra externs previously declared in src/c.zig (folded in after the removal
-// of `usingnamespace` in Zig 0.15+, which c.zig used to re-export this module).
-pub extern fn my_length(lean_obj_arg) u64;
+// Runtime initialization externs previously declared in src/c.zig (folded in
+// after the removal of `usingnamespace` in Zig 0.15+, which c.zig used to
+// re-export this module). App-specific externs (e.g. module initializers)
+// belong in the application that links them.
 pub extern fn lean_initialize_runtime_module() void;
 pub extern fn lean_initialize() void;
-pub extern fn initialize_RFFI(builtin: u8, LeanPtr) LeanPtr;

@@ -45,7 +45,7 @@
               if lean_path=$(elan which lean 2>/dev/null); then
                 export PATH="$(dirname "$lean_path"):$PATH"
               else
-                echo "elan: no default Lean toolchain set; run: elan default leanprover/lean4:v4.4.0" >&2
+                echo "elan: could not resolve the toolchain pinned in lean-toolchain (network needed on first run?)" >&2
               fi
             '';
           };

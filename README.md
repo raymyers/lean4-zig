@@ -7,7 +7,7 @@ Functions and comments manually translated from those in the [`lean.h` header](h
 ### Required
 
 - [zig](https://ziglang.org/download/) v0.16.0
-- [lean4](https://leanprover.github.io/download/) v4.4.0 (via [elan](https://github.com/leanprover/elan): `elan default leanprover/lean4:v4.4.0`)
+- [lean4](https://leanprover.github.io/download/) v4.30.0 (installed automatically by [elan](https://github.com/leanprover/elan) from `lean-toolchain`)
 
 Or with Nix: `nix develop` provides zig and elan (see `flake.nix`).
 
