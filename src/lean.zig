@@ -1048,8 +1048,8 @@ pub extern fn lean_nat_pow(a1: b_lean_obj_arg, a2: b_lean_obj_arg) lean_obj_res;
 pub extern fn lean_nat_gcd(a1: b_lean_obj_arg, a2: b_lean_obj_arg) lean_obj_res;
 pub extern fn lean_nat_log2(a: b_lean_obj_arg) lean_obj_res;
 
-pub const LEAN_MAX_SMALL_INT = if (@sizeOf(*anyopaque) == 8) std.math.maxInt(c_int) else 1 << 30;
-pub const LEAN_MIN_SMALL_INT = if (@sizeOf(*anyopaque) == 8) std.math.maxInt(c_int) else -(1 << 30);
+pub const LEAN_MAX_SMALL_INT = if (@sizeOf(*anyopaque) == 8) std.math.maxInt(c_int) else std.math.maxInt(c_int) >> 1;
+pub const LEAN_MIN_SMALL_INT = if (@sizeOf(*anyopaque) == 8) std.math.minInt(c_int) else std.math.minInt(c_int) >> 1;
 pub extern fn lean_int_big_neg(a: LeanPtr) LeanPtr;
 pub extern fn lean_int_big_add(a1: LeanPtr, a2: LeanPtr) LeanPtr;
 pub extern fn lean_int_big_sub(a1: LeanPtr, a2: LeanPtr) LeanPtr;
@@ -1073,22 +1073,24 @@ pub fn lean_int_to_int(n: c_int) callconv(.c) lean_obj_res {
         return lean_big_int_to_int(n);
 }
 pub fn lean_int64_to_int(n: i64) callconv(.c) lean_obj_res {
+    // scalar Ints are stored as zero-extended 32-bit patterns: (unsigned)(int)n
     if (LEAN_LIKELY(LEAN_MIN_SMALL_INT <= n and n <= LEAN_MAX_SMALL_INT))
-        return lean_box(@bitCast(@as(isize, @truncate(n))))
+        return lean_box(@as(u32, @bitCast(@as(i32, @intCast(n)))))
     else
         return lean_big_int64_to_int(n);
 }
 pub fn lean_scalar_to_int64(a: b_lean_obj_arg) callconv(.c) i64 {
     assert(@src(), lean_is_scalar(a), "lean_is_scalar(a)");
     if (@sizeOf(*anyopaque) == 8)
-        return @intCast(@as(isize, @bitCast(lean_unbox(a))))
+        // (int)((unsigned)lean_unbox(a)): truncate to 32 bits, then sign-extend
+        return @as(i32, @bitCast(@as(u32, @truncate(lean_unbox(a)))))
     else
         return @intCast(@as(isize, @bitCast(@intFromPtr(a))) >> 1);
 }
 pub fn lean_scalar_to_int(a: b_lean_obj_arg) callconv(.c) c_int {
     assert(@src(), lean_is_scalar(a), "lean_is_scalar(a)");
     if (@sizeOf(*anyopaque) == 8)
-        return @intCast(@as(isize, @bitCast(lean_unbox(a))))
+        return @as(i32, @bitCast(@as(u32, @truncate(lean_unbox(a)))))
     else
         return @intCast(@as(isize, @bitCast(@intFromPtr(a))) >> 1);
 }
@@ -3467,5 +3469,420 @@ test "compile_all_pub_decls" {
     @setEvalBranchQuota(100_000);
     inline for (comptime std.meta.declarations(@This())) |d| {
         _ = &@field(@This(), d.name);
+    }
+}
+
+// --- M3: scalar ABI -----------------------------------------------------------
+
+test "signed integer families follow C semantics" {
+    const fams = .{
+        .{ "int8", u8, i8 },
+        .{ "int16", u16, i16 },
+        .{ "int32", u32, i32 },
+        .{ "int64", u64, i64 },
+        .{ "isize", usize, isize },
+    };
+    inline for (fams) |f| {
+        const name = f[0];
+        const uT = f[1];
+        const iT = f[2];
+        const Self = @This();
+        const add = @field(Self, "lean_" ++ name ++ "_add");
+        const mul = @field(Self, "lean_" ++ name ++ "_mul");
+        const neg = @field(Self, "lean_" ++ name ++ "_neg");
+        const div = @field(Self, "lean_" ++ name ++ "_div");
+        const mod = @field(Self, "lean_" ++ name ++ "_mod");
+        const shr = @field(Self, "lean_" ++ name ++ "_shift_right");
+        const shl = @field(Self, "lean_" ++ name ++ "_shift_left");
+        const abs = @field(Self, "lean_" ++ name ++ "_abs");
+        const dec_lt = @field(Self, "lean_" ++ name ++ "_dec_lt");
+        const min: uT = @bitCast(@as(iT, std.math.minInt(iT)));
+        const max: uT = @bitCast(@as(iT, std.math.maxInt(iT)));
+        const m1: uT = @bitCast(@as(iT, -1));
+        const u = struct {
+            fn of(x: iT) uT {
+                return @bitCast(x);
+            }
+        };
+
+        // wrapping arithmetic on the unsigned carriers
+        try std.testing.expectEqual(min, add(max, 1));
+        try std.testing.expectEqual(u.of(-2), mul(max, 2));
+        try std.testing.expectEqual(min, neg(min));
+        // div/mod conventions: x/0 = 0, x%0 = x, minInt/-1 wraps
+        try std.testing.expectEqual(@as(uT, 0), div(u.of(5), 0));
+        try std.testing.expectEqual(u.of(7), mod(u.of(7), 0));
+        try std.testing.expectEqual(min, div(min, m1));
+        try std.testing.expectEqual(@as(uT, 0), mod(min, m1));
+        try std.testing.expectEqual(u.of(-3), div(u.of(7), u.of(-2))); // trunc
+        try std.testing.expectEqual(u.of(-1), mod(u.of(-7), u.of(2)));
+        // arithmetic shift right; amounts are smod bit-width
+        try std.testing.expectEqual(u.of(-4), shr(u.of(-16), 2));
+        const bits: iT = @bitSizeOf(iT);
+        try std.testing.expectEqual(shr(u.of(-16), 1), shr(u.of(-16), u.of(bits + 1)));
+        try std.testing.expectEqual(u.of(8), shl(1, 3));
+        try std.testing.expectEqual(min, shl(1, m1)); // smod: shift by width-1
+        // abs(minInt) = minInt; signed comparison (not bit-pattern order)
+        try std.testing.expectEqual(min, abs(min));
+        try std.testing.expectEqual(u.of(5), abs(u.of(-5)));
+        try std.testing.expectEqual(@as(u8, 1), dec_lt(m1, 1));
+
+        // of_int / to_int roundtrip through the runtime's Int objects
+        testEnsureRuntime();
+        const to_int = if (comptime std.mem.eql(u8, name, "int64"))
+            Self.lean_int64_to_int_sint
+        else
+            @field(Self, "lean_" ++ name ++ "_to_int");
+        const of_int = @field(Self, "lean_" ++ name ++ "_of_int");
+        const neg42 = lean_int64_to_int(-42);
+        const carried = of_int(neg42);
+        try std.testing.expectEqual(u.of(-42), carried);
+        const back = to_int(carried);
+        try std.testing.expectEqual(@as(u8, 1), lean_int_dec_eq(back, neg42));
+        lean_dec(back);
+        lean_dec(neg42);
+    }
+}
+
+test "signed cross-width conversions sign-extend and truncate" {
+    try std.testing.expectEqual(@as(u64, @bitCast(@as(i64, -5))), lean_int8_to_int64(@bitCast(@as(i8, -5))));
+    try std.testing.expectEqual(@as(u8, @bitCast(@as(i8, -1))), lean_int64_to_int8(@bitCast(@as(i64, -1))));
+    try std.testing.expectEqual(@as(u8, 0x34), lean_int64_to_int8(0x1234)); // truncation
+    try std.testing.expectEqual(@as(u64, @bitCast(@as(i64, -7))), lean_isize_to_int64(@bitCast(@as(isize, -7))));
+    try std.testing.expectEqual(@as(usize, @bitCast(@as(isize, -7))), lean_int64_to_isize(@bitCast(@as(i64, -7))));
+}
+
+// --- M3: Float / Float32 --------------------------------------------------------
+
+test "float bit conversions and saturating casts" {
+    testEnsureRuntime();
+    try std.testing.expectEqual(@as(u64, 0x3FF8000000000000), lean_float_to_bits(1.5));
+    try std.testing.expectEqual(@as(f64, 1.5), lean_float_of_bits(0x3FF8000000000000));
+    try std.testing.expectEqual(@as(u32, 0x3FC00000), lean_float32_to_bits(1.5));
+    try std.testing.expectEqual(@as(f32, 1.5), lean_float32_of_bits(0x3FC00000));
+
+    // saturation per lean.h: clamp to min/max, NaN -> 0
+    try std.testing.expectEqual(@as(u8, 127), lean_float_to_int8(200.0));
+    try std.testing.expectEqual(@as(u8, @bitCast(@as(i8, -128))), lean_float_to_int8(-200.0));
+    try std.testing.expectEqual(@as(u8, 0), lean_float_to_int8(std.math.nan(f64)));
+    try std.testing.expectEqual(@as(u8, 255), lean_float32_to_uint8(300.0));
+    try std.testing.expectEqual(@as(u8, 0), lean_float32_to_uint8(-1.0));
+    try std.testing.expectEqual(@as(u64, @bitCast(@as(i64, -3))), lean_float_to_int64(-3.7));
+    try std.testing.expectEqual(@as(usize, @bitCast(@as(isize, -3))), lean_float_to_isize(-3.7));
+    try std.testing.expect(lean_float32_isnan(std.math.nan(f32)) != 0);
+    try std.testing.expect(lean_float32_isinf(std.math.inf(f32)) != 0);
+}
+
+test "float32 boxing and ctor float fields" {
+    testEnsureRuntime();
+    const b = lean_box_float32(2.25);
+    try std.testing.expectEqual(@as(f32, 2.25), lean_unbox_float32(b));
+    lean_dec(b);
+
+    // ctor with one object field and a float32 + float scalar area
+    const o = lean_alloc_ctor(0, 1, @sizeOf(f64) + @sizeOf(f32));
+    lean_ctor_set(o, 0, lean_box(1));
+    const scalar_base: c_uint = @sizeOf(*anyopaque) * 1;
+    lean_ctor_set_float(o, scalar_base, 6.5);
+    lean_ctor_set_float32(o, scalar_base + @sizeOf(f64), -1.5);
+    try std.testing.expectEqual(@as(f64, 6.5), lean_ctor_get_float(o, scalar_base));
+    try std.testing.expectEqual(@as(f32, -1.5), lean_ctor_get_float32(o, scalar_base + @sizeOf(f64)));
+    lean_dec(o);
+}
+
+// --- M3: Nat / Int boundaries ----------------------------------------------------
+
+test "int euclidean and exact division, scalar and bignum" {
+    testEnsureRuntime();
+    const n7 = lean_int64_to_int(-7);
+    const p2 = lean_int64_to_int(2);
+    const q = lean_int_ediv(n7, p2);
+    const r = lean_int_emod(n7, p2);
+    const exp_q = lean_int64_to_int(-4);
+    const exp_r = lean_int64_to_int(1);
+    try std.testing.expectEqual(@as(u8, 1), lean_int_dec_eq(q, exp_q));
+    try std.testing.expectEqual(@as(u8, 1), lean_int_dec_eq(r, exp_r));
+    for ([_]LeanPtr{ n7, p2, q, r, exp_q, exp_r }) |x| lean_dec(x);
+
+    // bignum path: (-2^65) ediv 2 == -2^64
+    const big = lean_cstr_to_int("-36893488147419103232");
+    const two = lean_int64_to_int(2);
+    const bq = lean_int_ediv(big, two);
+    const exp_bq = lean_cstr_to_int("-18446744073709551616");
+    try std.testing.expectEqual(@as(u8, 1), lean_int_dec_eq(bq, exp_bq));
+    for ([_]LeanPtr{ big, two, bq, exp_bq }) |x| lean_dec(x);
+
+    const t = lean_int64_to_int(-12);
+    const f = lean_int64_to_int(4);
+    const e = lean_int_div_exact(t, f);
+    const exp_e = lean_int64_to_int(-3);
+    try std.testing.expectEqual(@as(u8, 1), lean_int_dec_eq(e, exp_e));
+    for ([_]LeanPtr{ t, f, e, exp_e }) |x| lean_dec(x);
+
+    const nd = lean_nat_div_exact(lean_box(12), lean_box(4));
+    try std.testing.expectEqual(@as(usize, 3), lean_unbox(nd));
+}
+
+test "nat scalar<->bignum boundary in both directions" {
+    testEnsureRuntime();
+    // usize max does not fit in a scalar nat
+    const big = lean_usize_to_nat(std.math.maxInt(usize));
+    try std.testing.expect(!lean_is_scalar(big));
+    const expected = lean_cstr_to_nat("18446744073709551615");
+    try std.testing.expectEqual(@as(u8, 1), lean_nat_dec_eq(big, expected));
+    // subtracting brings it back below the scalar boundary
+    const small = lean_nat_sub(big, expected);
+    try std.testing.expect(lean_is_scalar(small));
+    try std.testing.expectEqual(@as(usize, 0), lean_unbox(small));
+    lean_dec(big);
+    lean_dec(expected);
+}
+
+// --- M3: strings ------------------------------------------------------------------
+
+test "utf8 string accessors on multi-byte content" {
+    testEnsureRuntime();
+    const s = lean_mk_string("h\xc3\xa9\xce\xbb\xf0\x9f\x8c\x8d!"); // "héλ🌍!"
+    try std.testing.expectEqual(@as(usize, 5), lean_string_len(s)); // codepoints
+    try std.testing.expectEqual(@as(usize, 11), lean_string_size(s)); // bytes + NUL
+    try std.testing.expectEqual(@as(u32, 'h'), lean_string_utf8_get(s, lean_box(0)));
+    try std.testing.expectEqual(@as(u32, 0xE9), lean_string_utf8_get(s, lean_box(1))); // é
+    try std.testing.expectEqual(@as(u32, 0x1F30D), lean_string_utf8_get(s, lean_box(5))); // 🌍
+    const next = lean_string_utf8_next(s, lean_box(1));
+    try std.testing.expectEqual(@as(usize, 3), lean_unbox(next)); // é is 2 bytes
+    try std.testing.expectEqual(@as(u8, 'h'), lean_string_get_byte_fast(s, lean_box(0)));
+    lean_dec(s);
+}
+
+test "unchecked string constructors and memcmp" {
+    testEnsureRuntime();
+    const a = lean_mk_string_from_bytes_unchecked("abc", 3);
+    try std.testing.expectEqualStrings("abc", std.mem.span(lean_string_cstr(a)));
+    try std.testing.expectEqual(@as(usize, 3), lean_string_len(a));
+    const b = lean_mk_ascii_string_unchecked("abd");
+    // equal prefixes compare equal; differing bytes do not
+    try std.testing.expectEqual(@as(u8, 1), lean_string_memcmp(a, b, lean_box(0), lean_box(0), lean_box(2)));
+    try std.testing.expectEqual(@as(u8, 0), lean_string_memcmp(a, b, lean_box(0), lean_box(0), lean_box(3)));
+    lean_dec(a);
+    lean_dec(b);
+}
+
+// --- M3: arrays --------------------------------------------------------------------
+
+test "array copy-on-write via ensure_exclusive" {
+    testEnsureRuntime();
+    var a = lean_mk_empty_array();
+    a = lean_array_push(a, lean_box(1));
+    a = lean_array_push(a, lean_box(2));
+    // shared array: uset must copy, leaving the original intact
+    lean_inc(a);
+    const a2 = lean_array_uset(a, 0, lean_box(9));
+    try std.testing.expect(a2 != a);
+    try std.testing.expectEqual(@as(usize, 1), lean_unbox(lean_array_uget(a, 0)));
+    try std.testing.expectEqual(@as(usize, 9), lean_unbox(lean_array_uget(a2, 0)));
+    lean_dec(a2);
+    // exclusive array: uset mutates in place
+    const a3 = lean_array_uset(a, 1, lean_box(7));
+    try std.testing.expect(a3 == a);
+    lean_dec(a3);
+}
+
+test "borrowed array getters do not touch refcounts" {
+    testEnsureRuntime();
+    var a = lean_mk_empty_array();
+    const s = lean_mk_string("elem");
+    lean_inc(s); // keep our own reference
+    a = lean_array_push(a, s);
+    const rc_before = s.m_rc;
+    const got = lean_array_uget_borrowed(a, 0);
+    try std.testing.expect(got == s);
+    try std.testing.expectEqual(rc_before, s.m_rc);
+    // owned uget increments
+    const got_owned = lean_array_uget(a, 0);
+    try std.testing.expectEqual(rc_before + 1, s.m_rc);
+    lean_dec(got_owned);
+    const def = lean_mk_string("default");
+    _ = lean_array_get_borrowed(def, a, lean_box(0));
+    try std.testing.expectEqual(@as(c_int, 1), def.m_rc);
+    lean_dec(def);
+    lean_dec(a);
+    lean_dec(s);
+}
+
+test "array_to_list and byte/float arrays" {
+    testEnsureRuntime();
+    var a = lean_mk_empty_array();
+    a = lean_array_push(a, lean_box(1));
+    const l = lean_array_to_list(a); // consumes a
+    try std.testing.expectEqual(@as(c_uint, 1), lean_obj_tag(l)); // List.cons
+    try std.testing.expectEqual(@as(usize, 1), lean_unbox(lean_ctor_get(l, 0)));
+    const tail = lean_ctor_get(l, 1);
+    try std.testing.expect(lean_is_scalar(tail)); // List.nil == lean_box(0)
+    try std.testing.expectEqual(@as(usize, 0), lean_unbox(tail));
+    lean_dec(l);
+
+    var ba = lean_mk_empty_byte_array(lean_box(0));
+    ba = lean_byte_array_push(ba, 0xAB);
+    ba = lean_byte_array_push(ba, 0xCD);
+    try std.testing.expectEqual(@as(u8, 0xCD), lean_byte_array_uget(ba, 1));
+    try std.testing.expectEqual(@as(usize, 2), lean_unbox(lean_byte_array_size(ba)));
+    try std.testing.expectEqual(lean_object_data_byte_size(ba), lean_sarray_data_byte_size(ba));
+    lean_dec(ba);
+
+    var fa = lean_mk_empty_float_array(lean_box(0));
+    fa = lean_float_array_push(fa, 1.5);
+    try std.testing.expectEqual(@as(f64, 1.5), lean_float_array_uget(fa, 0));
+    lean_dec(fa);
+}
+
+// --- M3: ctor scalar fields and byte sizes -----------------------------------------
+
+test "ctor scalar fields and runtime byte-size agreement" {
+    testEnsureRuntime();
+    const o = lean_alloc_ctor(5, 1, @sizeOf(usize) + 1);
+    lean_ctor_set(o, 0, lean_box(3));
+    lean_ctor_set_usize(o, 1, 9999);
+    const byte_off: c_uint = @sizeOf(*anyopaque) * 1 + @sizeOf(usize);
+    lean_ctor_set_uint8(o, byte_off, 0x5A);
+    try std.testing.expectEqual(@as(usize, 9999), lean_ctor_get_usize(o, 1));
+    try std.testing.expectEqual(@as(u8, 0x5A), lean_ctor_get_uint8(o, byte_off));
+    lean_ctor_release(o, 0); // dec + null the object field
+    lean_dec(o);
+
+    // inline byte-size helpers agree with the runtime's lean_object_data_byte_size
+    const s = lean_mk_string("hello!");
+    try std.testing.expectEqual(lean_object_data_byte_size(s), lean_string_data_byte_size(s));
+    lean_dec(s);
+    var arr = lean_mk_empty_array();
+    arr = lean_array_push(arr, lean_box(1));
+    try std.testing.expectEqual(lean_object_data_byte_size(arr), lean_array_data_byte_size(arr));
+    lean_dec(arr);
+}
+
+// --- M3: ownership, MT/persistent, externals ----------------------------------------
+
+test "io_result_take_value transfers ownership" {
+    testEnsureRuntime();
+    const v = lean_mk_string("payload");
+    const r = lean_io_result_mk_ok(v);
+    const taken = lean_io_result_take_value(r); // consumes r
+    try std.testing.expect(taken == v);
+    try std.testing.expectEqual(@as(c_int, 1), taken.m_rc);
+    lean_dec(taken);
+}
+
+test "multi-threaded and persistent refcount paths" {
+    testEnsureRuntime();
+    const o = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(o, 0, lean_box(1));
+    lean_mark_mt(o);
+    try std.testing.expect(o.m_rc < 0);
+    const rc0 = o.m_rc;
+    lean_inc(o); // atomic sub on negative rc
+    try std.testing.expectEqual(rc0 - 1, o.m_rc);
+    lean_dec(o);
+    try std.testing.expectEqual(rc0, o.m_rc);
+    lean_dec(o); // frees through the MT path
+
+    const p = lean_alloc_ctor(0, 0, 0);
+    lean_mark_persistent(p);
+    try std.testing.expectEqual(@as(c_int, 0), p.m_rc);
+    lean_inc(p);
+    lean_dec(p);
+    try std.testing.expectEqual(@as(c_int, 0), p.m_rc); // rc never moves
+}
+
+var test_finalized: bool = false;
+test "external classes: wrap, unwrap, finalize" {
+    testEnsureRuntime();
+    const S = struct {
+        fn finalize(data: ?*anyopaque) callconv(.c) void {
+            _ = data;
+            test_finalized = true;
+        }
+        fn foreach(data: ?*anyopaque, arg: b_lean_obj_arg) callconv(.c) void {
+            _ = data;
+            _ = arg;
+        }
+    };
+    const cls = lean_register_external_class(&S.finalize, &S.foreach);
+    const payload: *anyopaque = @ptrFromInt(0x1234);
+    const e = lean_alloc_external(cls, payload);
+    try std.testing.expect(lean_is_external(e));
+    try std.testing.expectEqual(@as(?*anyopaque, payload), lean_get_external_data(e));
+    // exclusive set_external_data mutates in place
+    const e2 = lean_set_external_data(e, @ptrFromInt(0x5678));
+    try std.testing.expect(e2 == e);
+    try std.testing.expectEqual(@as(?*anyopaque, @ptrFromInt(0x5678)), lean_get_external_data(e2));
+    try std.testing.expect(!test_finalized);
+    lean_dec(e2);
+    try std.testing.expect(test_finalized);
+}
+
+// --- M3: thunks and tasks -------------------------------------------------------------
+
+test "thunks: pure and lazily forced closures" {
+    testEnsureRuntime();
+    const t = lean_thunk_pure(lean_box(5));
+    const v = lean_thunk_get_own(t);
+    try std.testing.expectEqual(@as(usize, 5), lean_unbox(v));
+    lean_dec(t);
+
+    const S = struct {
+        fn compute(unit: lean_obj_arg) callconv(.c) lean_obj_res {
+            lean_dec(unit);
+            return lean_box(7);
+        }
+    };
+    const cl = lean_alloc_closure(@ptrCast(@constCast(&S.compute)), 1, 0);
+    const lazy = lean_mk_thunk(cl);
+    const forced = lean_thunk_get_own(lazy);
+    try std.testing.expectEqual(@as(usize, 7), lean_unbox(forced));
+    lean_dec(lazy);
+}
+
+test "tasks: spawn through the task manager and query state" {
+    testEnsureRuntime();
+    lean_init_task_manager();
+    const S = struct {
+        fn work(unit: lean_obj_arg) callconv(.c) lean_obj_res {
+            lean_dec(unit);
+            return lean_box(11);
+        }
+    };
+    const cl = lean_alloc_closure(@ptrCast(@constCast(&S.work)), 1, 0);
+    const t = lean_task_spawn(cl, lean_box(0));
+    const v = lean_task_get_own(t);
+    try std.testing.expectEqual(@as(usize, 11), lean_unbox(v));
+
+    const done = lean_task_pure(lean_box(0));
+    try std.testing.expectEqual(@as(u8, 2), lean_io_get_task_state_core(done)); // finished
+    lean_dec(done);
+}
+
+test "unsigned integer families follow C semantics" {
+    const fams = .{
+        .{ "uint8", u8 },
+        .{ "uint16", u16 },
+        .{ "uint32", u32 },
+        .{ "uint64", u64 },
+        .{ "usize", usize },
+    };
+    inline for (fams) |f| {
+        const name = f[0];
+        const uT = f[1];
+        const Self = @This();
+        const add = @field(Self, "lean_" ++ name ++ "_add");
+        const mul = @field(Self, "lean_" ++ name ++ "_mul");
+        const div = @field(Self, "lean_" ++ name ++ "_div");
+        const mod = @field(Self, "lean_" ++ name ++ "_mod");
+        const neg = @field(Self, "lean_" ++ name ++ "_neg");
+        const max: uT = std.math.maxInt(uT);
+
+        try std.testing.expectEqual(@as(uT, 0), add(max, 1)); // wraps
+        try std.testing.expectEqual(max - 1, mul(max, 2)); // wraps
+        try std.testing.expectEqual(@as(uT, 0), div(@as(uT, 5), 0)); // x/0 = 0
+        try std.testing.expectEqual(@as(uT, 7), mod(@as(uT, 7), 0)); // x%0 = x
+        try std.testing.expectEqual(max, neg(1)); // two's complement
     }
 }
